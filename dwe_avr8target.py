@@ -1,0 +1,279 @@
+"""
+Device Specific Classes which use AVR8Protocol implementation
+"""
+import time
+from logging import getLogger
+from pyedbglib.protocols.avr8protocol import Avr8Protocol
+from pyedbglib.protocols.jtagice3protocol import Jtagice3ResponseError
+from pyedbglib.util import binary
+
+from pymcuprog.deviceinfo import deviceinfo
+from pymcuprog.deviceinfo.memorynames import MemoryNames
+from pymcuprog.deviceinfo.deviceinfokeys import DeviceInfoKeys, DeviceInfoKeysAvr, DeviceMemoryInfoKeys
+from pymcuprog.pymcuprog_errors import PymcuprogError
+
+from pymcuprog.avr8target import TinyXAvrTarget, TinyAvrTarget, MegaAvrJtagTarget, XmegaAvrTarget
+
+
+class DWETinyXAvrTarget(TinyXAvrTarget):
+    """
+    Class handling sessions with TinyX AVR targets using the AVR8 generic protocol
+    """
+
+    def __init__(self, transport):
+        super(DWETinyXAvrTarget, self).__init__(transport)
+
+    # The next two methods are needed because different targets access the registers
+    # in different ways: TinyX and XMega have a regfile mem type, the others have to access
+    # the registers as part of their SRAM address space.
+    def register_file_read(self):
+        """
+        Reads out the AVR register file (R0::R31)
+
+        :return: 32 bytes of register file content as bytearray
+        """
+        self.logger.debug("Reading register file")
+        return self.protocol.regfile_read()
+
+    def register_file_write(self, regs):
+        """
+        Writes the AVR register file (R0::R31)
+
+        :param data: 32 byte register file content as bytearray
+        :raises ValueError: if 32 bytes are not given
+        """
+        self.logger.debug("Writing register file")
+        self.protocol.regfile_write(regs)            
+
+    def statreg_read(self):
+        """
+        Reads SREG
+        
+        :returns: 1 Byte of SREG
+        :rtype: bytearray
+        """
+        return self.protocol.memory_read(Avr8Protocol.AVR8_MEMTYPE_OCD, Avr8Protocol.AVR8_MEMTYPE_OCD_SREG, 1)
+
+    def statreg_write(self, data):
+        """
+        Writes SREG
+        
+        """
+        self.protocol.memory_write(Avr8Protocol.AVR8_MEMTYPE_OCD, Avr8Protocol.AVR8_MEMTYPE_OCD_SREG, data)
+    
+    def stack_pointer_write(self,data):
+        """
+        Writes the stack pointer
+        """
+        self.protocol.memory_write(Avr8Protocol.AVR8_MEMTYPE_OCD, 0x18, data)
+        
+
+class DWETinyAvrTarget(TinyAvrTarget):
+    """
+    Implements Tiny AVR (debugWIRE) functionality of the AVR8 protocol
+    """
+
+    def __init__(self, transport):
+        super(DWETinyAvrTarget, self).__init__(transport)
+
+        # next lines are copied from TinyXAvrTarget 
+        if transport.device.product_string.lower().startswith('edbg'):
+            # This is a workaround for FW3G-158 which has not been fixed for EDBG (fixed in common,
+            # but no new EDBG firmware has/will be built)
+            self.max_read_chunk_size = 256
+
+
+    def setup_config(self, device_info):
+        """
+        Sets up the device config for a tiny AVR device
+
+        :param device_info: Target device information as returned by deviceinfo.deviceinfo.getdeviceinfo
+        :type device_info: dict
+        """
+        if device_info is None:
+            device_info = {}
+
+        # Parse the device info for memory descriptions
+        device_memory_info = deviceinfo.DeviceMemoryInfo(device_info)
+
+        flash_info = device_memory_info.memory_info_by_name(MemoryNames.FLASH)
+        eeprom_info = device_memory_info.memory_info_by_name(MemoryNames.EEPROM)
+        sram_info = device_memory_info.memory_info_by_name(MemoryNames.INTERNAL_SRAM)
+        # Extract settings
+        fl_page_size = flash_info[DeviceMemoryInfoKeys.PAGE_SIZE]
+        fl_size = flash_info[DeviceMemoryInfoKeys.SIZE]
+        fl_base = flash_info[DeviceMemoryInfoKeys.ADDRESS]
+        sram_base = sram_info[DeviceMemoryInfoKeys.ADDRESS]
+        ee_base = eeprom_info[DeviceMemoryInfoKeys.ADDRESS]
+        ee_page_size = eeprom_info[DeviceMemoryInfoKeys.PAGE_SIZE]
+        ee_size = eeprom_info[DeviceMemoryInfoKeys.SIZE]
+        ocd_addr = device_info.get(DeviceInfoKeysAvr.OCD_BASE)
+        ocd_rev = device_info.get('ocd_rev')
+        eearh_addr = device_info.get('eearh_base')
+        eearl_addr = device_info.get('eearl_base')
+        eecr_addr = device_info.get('eecr_base')
+        eedr_addr = device_info.get('eedr_base')
+        spmcr_addr = device_info.get('spmcr_base')
+        osccal_addr = device_info.get('osccal_base')
+        device_id = device_info.get(DeviceInfoKeys.DEVICE_ID)
+
+        # Setup device structure and write to tool
+        # TINY_FLASH_PAGE_BYTES (2@0x00)
+        devdata = bytearray([fl_page_size & 0xff, 0])
+        # TINY_FLASH_BYTES (4@0x02)
+        devdata += bytearray([fl_size & 0xFF, (fl_size >> 8) & 0xFF,
+                                  (fl_size >> 16) & 0xFF, (fl_size >> 24) & 0xFF])
+        # TINY_FLASH_BASE (4@0x06)
+        devdata += bytearray([fl_base & 0xFF, (fl_base >> 8) & 0xFF,
+                                  (fl_base >> 16) & 0xFF, (fl_base >> 24) & 0xFF])
+        # TINY_BOOT_BASE (4@0x0A)
+        boot_base = fl_size - fl_page_size # as is done for MegaAvr
+        devdata += bytearray([boot_base & 0xFF, (boot_base >> 8) & 0xFF,
+                                  (boot_base >> 16) & 0xFF, (boot_base >> 24) & 0xFF])        
+        # TINY_SRAM_BASE (2@0x0E)
+        devdata += bytearray([sram_base & 0xff, (sram_base >> 8) & 0xff])
+        # TINY_EEPROM_BYTES (2@0x10)
+        devdata += bytearray([ee_size & 0xff, (ee_size >> 8) & 0xff])
+        # TINY_EEPROM_PAGE_BYTES (1@0x12) 
+        devdata += bytearray([ee_page_size])
+        # TINY_OCD_REVISION (1@0x13)
+        devdata += bytearray([ocd_rev])
+        # 4 byte gap (4@0x14)
+        devdata += bytearray([0, 0, 0, 0])
+        # TINY_OCD_MODULE_ADDRESS (1@0x18)
+        devdata += bytearray([ocd_addr & 0xff])
+        # TINY_EEARH_BASE (1@0x19)
+        devdata += bytearray([eearh_addr & 0xFF])
+        # TINY_EEARL_BASE (1@0x1A)
+        devdata += bytearray([eearl_addr & 0xFF])
+        # TINY_EECR_BASE (1@0x1B)
+        devdata += bytearray([eecr_addr & 0xFF])
+        # TINY_EEDR_BASE (1@0x1C)
+        devdata += bytearray([eedr_addr & 0xFF])
+        # TINY_SPMCR_BASE (1@0x1D)
+        devdata += bytearray([spmcr_addr & 0xFF])
+        # TINY_OSCCAL_BASE (1@0x1E)
+        devdata += bytearray([osccal_addr & 0xFF])
+        
+        self.protocol.write_device_data(devdata)
+
+
+    def statreg_read(self):
+        """
+        Reads out SREG
+
+        :return: 1 byte of status register
+        """
+        return self.protocol.memory_read(Avr8Protocol.AVR8_MEMTYPE_SRAM, 0x5F, 1)
+
+    
+    def statreg_write(self, data):
+        """
+        Writes byte to SREG
+        :param: 1 byte of data
+
+        """
+        return self.protocol.memory_write(Avr8Protocol.AVR8_MEMTYPE_SRAM, 0x5F, data)
+        
+
+    def regfile_read(self):
+        """
+        Reads out the AVR register file (R0::R31)
+
+        :return: 32 bytes of register file content as bytearray
+        """
+        return self.protocol.memory_read(Avr8Protocol.AVR8_MEMTYPE_SRAM, 0, 32)
+
+    def regfile_write(self, regs):
+        """
+        Writes the AVR register file (R0::R31)
+
+        :param data: 32 byte register file content as bytearray
+        :raises ValueError: if 32 bytes are not given
+        """
+        return self.protocol.memory_write(Avr8Protocol.AVR8_MEMTYPE_SRAM, 0, regs)
+
+    def stack_pointer_read(self):
+        """
+        Reads the stack pointer
+
+        :returns: Stack pointer
+        :rtype: bytearray
+        """
+        return self.protocol.memory_read(Avr8Protocol.AVR8_MEMTYPE_SRAM, 0x5D, 0x02)
+
+    def stack_pointer_write(self, data):
+        """
+        Writes the stack pointer
+
+        :param data: 2 byte as bytearray
+        :raises ValueError: if 2 bytes are not given
+        """
+        return self.protocol.memory_write(Avr8Protocol.AVR8_MEMTYPE_SRAM, 0x5D, data)
+
+    
+class DWEMegaAvrJtagTarget(MegaAvrJtagTarget):
+    """
+    Implements Mega AVR (JTAG) functionality of the AVR8 protocol
+    """
+
+    def __init__(self, transport):
+        super(MegaAvrJtagTarget, self).__init__(transport)
+
+    def regfile_read(self):
+        """
+        Reads out the AVR register file (R0::R31)
+
+        :return: 32 bytes of register file content as bytearray
+        """
+        return self.protocol.memory_read(Avr8Protocol.AVR8_MEMTYPE_SRAM, 0, 32)
+
+    def regfile_write(self, regs):
+        """
+        Writes the AVR register file (R0::R31)
+
+        :param data: 32 byte register file content as bytearray
+        :raises ValueError: if 32 bytes are not given
+        """
+        return self.protocol.memory_write(Avr8Protocol.AVR8_MEMTYPE_SRAM, 0, regs)
+
+    
+        
+class DWEXmegaAvrTarget(XmegaAvrTarget):
+    """
+    Implements XMEGA (PDI) functionality of the AVR8 protocol
+    """
+
+    def __init__(self, transport):
+        super(XmegaAvrTarget, self).__init__(transport)
+
+    def setup_debug_session(self):
+        """
+        Sets up a debugging session on an XMEGA AVR
+        """
+        self.protocol.set_variant(Avr8Protocol.AVR8_VARIANT_XMEGA)
+        self.protocol.set_function(Avr8Protocol.AVR8_FUNC_DEBUGGING)
+        self.protocol.set_interface(Avr8Protocol.AVR8_PHY_INTF_PDI)
+
+    # The next two methods are needed because different targets access the registers
+    # in different ways: TinyX and XMega have a regfile mem type, the others have to access
+    # the registers as part of their SRAM address space.
+    def register_file_read(self):
+        """
+        Reads out the AVR register file (R0::R31)
+
+        :return: 32 bytes of register file content as bytearray
+        """
+        self.logger.debug("Reading register file")
+        return self.protocol.regfile_read()
+
+    def register_file_write(self, regs):
+        """
+        Writes the AVR register file (R0::R31)
+
+        :param data: 32 byte register file content as bytearray
+        :raises ValueError: if 32 bytes are not given
+        """
+        self.logger.debug("Writing register file")
+        return self.protocol.regfile_write(regs)            
+

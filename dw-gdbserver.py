@@ -1,7 +1,7 @@
 """
 debugWIRE GDBServer 
 """
-VERSION="0.0.0-pre1"
+VERSION="0.0.1"
 
 SIGTRAP = "S05"
 STATUS_SUCCESS = 0
@@ -10,6 +10,7 @@ import site
 
 site.addsitedir("../pyedbglib")
 site.addsitedir("../pymcuprog")
+site.addsitedir("../../Library/Python/3.13/lib/python/site-packages")
 
 # args, logging
 import sys
@@ -28,6 +29,7 @@ import time
 from pyedbglib.hidtransport.hidtransportfactory import hid_transport
 import pymcuprog
 from pymcuprog.avrdebugger import AvrDebugger
+from dwe_avrdebugger import DWEAvrDebugger
 from pymcuprog.backend import Backend
 from pymcuprog.pymcuprog_main import _setup_tool_connection
 
@@ -90,6 +92,7 @@ class GdbHandler():
                     # Since we are using a tcp connection we do not want to split up messages into different packets
                     # so packetsize is set absurdly large
                     self.sendPacket("PacketSize=1000000")
+                    self.dbg.software_breakpoint_clear_all()
                     return
                 if "Symbol::" in query:
                     self.sendPacket("OK")
@@ -208,9 +211,7 @@ class GdbHandler():
             addr = addrSizeData.split(",")[0]
             size = (addrSizeData.split(",")[1]).split(":")[0]
             data = (addrSizeData.split(",")[1]).split(":")[1]
-            self.logger.debug(addr)
-            self.logger.debug(size)
-            self.logger.debug(data)
+            self.logger.debug("Memory write addr=%s, size=%s, data=%s", addr, size, data)
             addrSection = 00
             if len(addr) > 4:
                 if len(addr) == 6:
@@ -257,11 +258,13 @@ class GdbHandler():
             regString = regString + sregString + spString
             self.sendPacket(regString)
         elif command[0] == "G":
-            newRegData = command[1:]
-            # Do reg writing
-            # TODO: Implement
-            self.logger.debug(newRegData)
-            self.sendPacket("")
+            newRegData = int(command[1:],16)
+            newdata = newRegData.to_bytes(35, byteorder='big')
+            self.dbg.register_file_write(newdata[:32])
+            self.dbg.status_register_write(newdata[32:33])
+            self.dbg.stack_pointer_write(newdata[33:])
+            self.logger.debug("New register data from GDB: %s", newRegData)
+            self.sendPacket("OK")
         elif command[0] == "k":
             self.dbg.stop_debugging()
             raise EndOfSession("Session ended by client ('k')")
@@ -291,7 +294,7 @@ class GdbHandler():
                 checksum = (data.split("#")[1])[:2]
                 packet_data = (data.split("$")[1]).split("#")[0]
                 if int(checksum, 16) != sum(packet_data.encode("ascii")) % 256:
-                    self.logger.warning("Checksum Wrong!")
+                    self.logger.warning("Checksum Wrong in packet: %s", data)
                     validData = False
                 if validData:
                     self.socket.sendall(b"+")
@@ -362,9 +365,10 @@ def main():
             '''))
 
     # Device to program
-    parser.add_argument("-m", "--mcu",
-                        type=str,
-                        help="mcu to debug")
+    parser.add_argument("-d", "--device",
+                            dest='dev',
+                            type=str,
+                            help="device to debug")
     
     parser.add_argument('-g', '--gede',  action="store_true",
                             help='start gede')    
@@ -377,27 +381,27 @@ def main():
     
     # Tool to use
     parser.add_argument("-t", "--tool",
-                        type=str,
-                        help="tool to connect to")
+                            type=str,
+                            help="tool to connect to")
 
     parser.add_argument("-u", "--usbsn",
-                        type=str,
-                        dest='serialnumber',
-                        help="USB serial number of the unit to use")
+                            type=str,
+                            dest='serialnumber',
+                            help="USB serial number of the unit to use")
 
     parser.add_argument("-v", "--verbose",
-                        default="warning", choices=['debug', 'info', 'warning', 'error', 'critical'],
-                        help="Logging verbosity level")
+                            default="warning", choices=['debug', 'info', 'warning', 'error', 'critical'],
+                            help="Logging verbosity level")
 
     parser.add_argument("-V", "--version",
-                        help="Print dw-gdbserver version number and exit",
-                        action="store_true")
+                            help="Print dw-gdbserver version number and exit",
+                            action="store_true")
 
     # Parse args
     args = parser.parse_args()
 
     # Setup logging
-    logging.basicConfig(level=args.verbose.upper())
+    logging.basicConfig(stream=sys.stdout,level=args.verbose.upper())
 
     logger = getLogger()
     if args.version:
@@ -423,39 +427,41 @@ def main():
         backend.disconnect_from_tool()
 
     if not device:
-        device = args.mcu
-    elif args.mcu:
-        if arg.mcu != device:
+        device = args.dev
+    elif args.dev:
+        if arg.dev != device:
             print("Expected MCU:", args.mcu %s,", attached MCU: %s", device)
             sys.exit(1)
 
     if not device:
-        print("Please specify target MCU with -m option")
+        print("Please specify target MCU with -d option")
         sys.exit(1)
             
     transport = hid_transport()
     transport.connect(serial_number=toolconnection.serialnumber, product=toolconnection.tool_name)
 
-    # Attach debugger
-    logger.info("Attaching AvrDebugger to device: %s", device)
-    avrdebugger = AvrDebugger(transport)
-    avrdebugger.setup_session(device)
-    avrdebugger.start_debugging()
     try:
+        # Attach debugger
+        logger.info("Attaching AvrDebugger to device: %s", device)
+        avrdebugger = DWEAvrDebugger(transport)
+        avrdebugger.setup_session(device)
+        avrdebugger.start_debugging()
         logger.info("Attached")
     except:
         print("--- Could not connect to", device, "---")
         sys.exit(1)
 
-    # Start server and serve away
+    # Start server 
     logger.info("Starting dw-gdbserver")
     server = AvrGdbRspServer(avrdebugger, args.port)
     try:
         server.serve()
-    except EndOfSession:
+        
+    except (EndOfSession, SystemExit, KeyboardInterrupt):
         logger.info("End of session")
-
-
+        
+#    except Exception as e:
+#        print("Fatal Error:",e)
     
 if __name__ == "__main__":
     sys.exit(main())
