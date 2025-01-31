@@ -211,6 +211,12 @@ class DWETinyAvrTarget(TinyAvrTarget):
         """
         return self.protocol.memory_write(Avr8Protocol.AVR8_MEMTYPE_SRAM, 0x5D, data)
 
+    def breakpoint_clear(self):
+        """
+        Is needed in stop_debugging - should not be there!
+        """
+        return 0
+
     
 class DWEMegaAvrJtagTarget(MegaAvrJtagTarget):
     """
