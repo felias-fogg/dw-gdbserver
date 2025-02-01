@@ -1,7 +1,7 @@
 """
 debugWIRE GDBServer 
 """
-VERSION="0.0.2"
+VERSION="0.0.3"
 
 SIGHUP  = "S01"     # connection to target lost
 SIGINT  = "S02"     # Interrupt  - user interrupted the program (UART ISR) 
@@ -57,6 +57,8 @@ class GdbHandler():
         self.keep_dw_enabled = False
         self.connected = False
         self.dw_mode_active = False
+        self.extended_remote_mode = False
+        self.kill_timeout = 0
 
         self.packettypes = {
             '!' : self.extendedRemoteHandler,
@@ -100,7 +102,7 @@ class GdbHandler():
         """
         '!': GDB tries to switch to extended remote mode and we accept
         """
-        self.extendedRemoteMode = True
+        self.extended_remote_mode = True
         self.sendPacket("OK")
 
     def stopReasonHandler(self, packet):
@@ -351,6 +353,11 @@ class GdbHandler():
             self.logger.debug("Killing process")
             self.dbg.reset()
             self.sendPacket("OK")
+            if not self.extended_remote_mode:
+                raise EndOfSession
+            else:
+                self.kill_timeout = 1000
+                
         else:
             self.logger.debug("Unhandled command: %s", packet)
             self.sendPacket("")
@@ -454,6 +461,11 @@ class GdbHandler():
             self.logger.info("BREAK received")
             self.sendPacket(SIGTRAP)
             self.last_SIGVAL = SIGTRAP
+        if self.kill_timeout:
+            self.kill_timeout -= 1
+            if self.kill_timeout == 0:
+                raise EndOfSession
+
 
     def sendPacket(self, packetData):
         """
