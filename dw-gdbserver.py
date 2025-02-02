@@ -1,7 +1,7 @@
 """
 debugWIRE GDBServer 
 """
-VERSION="0.0.3"
+VERSION="0.0.4"
 
 SIGHUP  = "S01"     # connection to target lost
 SIGINT  = "S02"     # Interrupt  - user interrupted the program (UART ISR) 
@@ -17,6 +17,7 @@ site.addsitedir("../pymcuprog")
 site.addsitedir("../../Library/Python/3.13/lib/python/site-packages")
 
 # args, logging
+import time
 import sys
 import argparse
 import os
@@ -53,49 +54,62 @@ class GdbHandler():
         self.socket = socket
         self.dbg = avrdebugger
         self.last_SIGVAL = "S00"
-        self.packet_size = 4050
+        self.packet_size = 200
         self.keep_dw_enabled = False
         self.connected = False
         self.dw_mode_active = False
         self.extended_remote_mode = False
-        self.kill_timeout = 0
 
         self.packettypes = {
-            '!' : self.extendedRemoteHandler,
-            '?' : self.stopReasonHandler,
-            'c' : self.continueHandler,
-            # 'C' : self.continueWithSignalHandler, # - never happens in our context
-            'D' : self.detachHandler,
-            'g' : self.getRegisterHandler,
-            'G' : self.setRegisterHandler,
-            'H' : self.setThreadHandler,
-            # 'k' : self.killHandler, # never used because vKill is supported
-            'm' : self.getMemoryHandler,
-            'M' : self.setMemoryHandler,
-            'p' : self.getOneRegisterHandler,
-            'P' : self.setOneRegisterHandler,
-            'q' : self.queryHandler,
-            # 'Q' : self.settingHandler, # - no relevant cases
-            # 'R' : self.restartHandler, # - never used because vRun is supported
-            's' : self.stepHandler,
-            # 'S' : self.stepWithSignalHandler, # - also never happens
-            'T' : self.threadAliveHandler,
-            'v' : self.vCommandHandler,
-            'X' : self.setMemoryBinaryHandler,
-            'z' : self.removeBreakpointHandler,
-            'Z' : self.addBreakpointHandler,
+            '!'           : self.extendedRemoteHandler,
+            '?'           : self.stopReasonHandler,
+            'c'           : self.continueHandler,
+          # 'C'           : continue with signal - never happens in our context
+            'D'           : self.detachHandler,
+            'g'           : self.getRegisterHandler,
+            'G'           : self.setRegisterHandler,
+            'H'           : self.setThreadHandler,
+          # 'k'           : kill - never used because vKill is supported
+            'm'           : self.getMemoryHandler,
+            'M'           : self.setMemoryHandler,
+            'p'           : self.getOneRegisterHandler,
+            'P'           : self.setOneRegisterHandler,
+            'qAttached'   : self.attachedHandler,
+            'qOffsets'    : self.offsetsHandler,
+            'qRcmd'       : self.monitorCmdHandler,
+            'qSupported'  : self.supportedHandler,
+            'qfThreadInfo': self.firstThreadInfoHandler,
+            'qsThreadInfo': self.subsequentThreadInfoHandler,
+            'qXfer'       : self.memoryMapHandler,
+          # 'Q'           : general set commands - no relevant cases
+          # 'R'           : run command - never used because vRun is supported
+            's'           : self.stepHandler,
+          # 'S'           : stepping with signal - also never happens in our context
+            'T'           : self.threadAliveHandler,
+            'vFlashDone'  : self.flashDoneHandler,
+            'vFlashErase' : self.flashEraseHandler,
+            'vFlashWrite' : self.flashWriteHandler,
+            'vKill'       : self.killHandler,
+            'vRun'        : self.runHandler,
+            'X'           : self.setMemoryBinaryHandler,
+            'z'           : self.removeBreakpointHandler,
+            'Z'           : self.addBreakpointHandler,
             }
             
 
-    def dispatch(self, packet):
+    def dispatch(self, cmd, packet):
         """
         Dispatches command to the right handler
         """
         try:
-            self.handler = self.packettypes[packet[0:1]]
+            self.handler = self.packettypes[cmd]
         except (KeyError, IndexError):
-            self.logger.debug("Unhandled GDB RSP packet type: %s", packet[1:2])
+            self.logger.debug("Unhandled GDB RSP packet type: %s", cmd)
             self.sendPacket("")
+            return
+        
+        if cmd != 'X' and cmd != 'vFlashWrite': # no binary data
+            packet = packet.decode('ascii')
         self.handler(packet)
 
     def extendedRemoteHandler(self, packet):
@@ -115,20 +129,20 @@ class GdbHandler():
         """
         'c': Continue execution, either at current address or at given address
         """
-        if len(packet) > 1:
-            addr = packet[1:]
-            self.logger.debug("Set PC to 0x%s",addr)
-            #set PC - note, byte address converted to word address
-            self.dbg.program_counter_write(int(addr,16)>>1)
         self.logger.debug("Continue")
+        if packet:
+            self.logger.debug("Set PC to 0x%s",packet)
+            #set PC - note, byte address converted to word address
+            self.dbg.program_counter_write(int(packet,16)>>1)
         self.dbg.run()
 
     def detachHandler(self, packet):
         """
         'D': Just reset MCU. All the real housekeeping will take place when the connection is terminated
         """
-        self.logger.debug("detaching ...")
+        self.logger.debug("Detaching ...")
         self.dbg.reset()
+        self.sendPacket("OK")
         raise EndOfSession("Session ended by client ('detach')")
 
     def getRegisterHandler(self, packet):
@@ -155,7 +169,7 @@ class GdbHandler():
         """
         'G': Receive new register ( R[0:31] + SREAG + SP) values from GDB
         """
-        newRegData = int(packet[1:],16)
+        newRegData = int(packet,16)
         newdata = newRegData.to_bytes(35, byteorder='big')
         self.dbg.register_file_write(newdata[:32])
         self.dbg.status_register_write(newdata[32:33])
@@ -174,9 +188,8 @@ class GdbHandler():
         """
         'm': provide GDB with memory contents
         """
-        addrSize = packet[1:]
-        addr = addrSize.split(",")[0]
-        size = addrSize.split(",")[1]
+        addr = packet.split(",")[0]
+        size = packet.split(",")[1]
         self.logger.debug("Reading memory: addr=%s, size=%d", addr, int(size,16))
         addrSection = "00"
         if len(addr) > 4:
@@ -192,13 +205,13 @@ class GdbHandler():
             data = self.dbg.sram_read(int(addr, 16), int(size, 16))
         elif addrSection == "81": # eeprom
             data = self.dbg.eeprom_read(int(addr, 16), int(size, 16))
-        elif addrSection == "82" and self.device_info['interface'].upper() != 'ISP+DW': # fuse
+        elif addrSection == "82" and self.dbg.device_info['interface'].upper() != 'ISP+DW': # fuse
             data = self.dbg.read_fuse(int(addr, 16), int(size, 16))
-        elif addrSection == "83" and self.device_info['interface'].upper() != 'ISP+DW': # lock
+        elif addrSection == "83" and self.dbg.device_info['interface'].upper() != 'ISP+DW': # lock
             data = self.dbg.read_lock(int(addr, 16), int(size, 16))
         elif addrSection == "84": # signature
             data = self.dbg.read_signature(int(addr, 16), int(size, 16))
-        elif addrSection == "85" and self.device_info['interface'].upper() != 'ISP+DW': # user_signature
+        elif addrSection == "85" and self.dbg.device_info['interface'].upper() != 'ISP+DW': # user_signature
             data = self.dbg.read_user_signature(int(addr, 16), int(size, 16))
         elif addrSection == "00": # flash
             data = self.dbg.flash_read(int(addr, 16), int(size, 16))
@@ -217,10 +230,9 @@ class GdbHandler():
         """
         'M': GDB sends new data for MCU memory
         """
-        addrSizeData = packet[1:]
-        addr = addrSizeData.split(",")[0]
-        size = (addrSizeData.split(",")[1]).split(":")[0]
-        data = (addrSizeData.split(",")[1]).split(":")[1]
+        addr = packet.split(",")[0]
+        size = (packet.split(",")[1]).split(":")[0]
+        data = (packet.split(",")[1]).split(":")[1]
         self.logger.debug("Memory write addr=%s, size=%s, data=%s", addr, size, data)
         addrSection = "00"
         if len(addr) > 4:
@@ -239,13 +251,13 @@ class GdbHandler():
             data = self.dbg.sram_write(int(addr, 16), data)
         elif addrSection == "81": #eeprom
             data = self.dbg.eeprom_write(int(addr, 16), data)
-        elif addrSection == "82" and self.device_info['interface'].upper() != 'ISP+DW': #fuse
+        elif addrSection == "82" and self.dbg.device_info['interface'].upper() != 'ISP+DW': #fuse
             data = self.dbg.write_fuse(int(addr, 16), data)
-        elif addrSection == "83" and self.device_info['interface'].upper() != 'ISP+DW': #lock
+        elif addrSection == "83" and self.dbg.device_info['interface'].upper() != 'ISP+DW': #lock
             data = self.dbg.write_lock(int(addr, 16), data)
         elif addrSection == "84": #signature
             data = self.dbg.write_signature(int(addr, 16), data)
-        elif addrSection == "85" and self.device_info['interface'].upper() != 'ISP+DW': #user signature
+        elif addrSection == "85" and self.dbg.device_info['interface'].upper() != 'ISP+DW': #user signature
             data = self.dbg.write_user_signature(int(addr, 16), data)
         else:
             # Flash write not supported here
@@ -261,70 +273,143 @@ class GdbHandler():
         'p': read register and send to GDB
         currently only PC
         """
-        if len(packet) > 1:
-            if packet[1:] == "22":
-                # GDB defines PC register for AVR to be REG34(0x22)
-                pc = self.dbg.program_counter_read()
-                pc = pc << 1 # MCU internal address is a word address, GDB uses byte addresses
-                pcString = format(pc, '08x')
-                pcByteAr = bytearray.fromhex(pcString.upper())
-                pcByteAr.reverse()
-                pcByteString = ''.join(format(x, '02x') for x in pcByteAr)
-                self.logger.debug("PC: %s", pcByteString)
-                self.sendPacket(pcByteString)
-                return
+        if packet == "22":
+            # GDB defines PC register for AVR to be REG34(0x22)
+            # end the bytes have to be given in reverse order (big endian)
+            pc = self.dbg.program_counter_read()
+            self.logger.debug("get PC command: {:X}".format(pc))
+            pcByteString = binascii.hexlify((pc << 1).to_bytes(4,byteorder='little')).decode('ascii')
+            self.sendPacket(pcByteString)
+            return
         self.logger.debug("Unhandled command: '%s'", packet)
         self.sendPacket("")
         
     def setOneRegisterHandler(self, packet):
         """
         'P': set a single register with a new value given by GDB
-        currently not implemented, but should
         """
-        self.logger.debug("Unhandled command: '%s'", packet)
-        self.sendPacket("")
+        if packet[0:3] == "22=":
+            self.logger.debug("set PC command")
+            pc = int(binascii.hexlify(int(packet[3:],16).to_bytes(4,byteorder='little'))) >> 1
+            self.dbg.program_counter_write(pc)
+            self.sendPacket("OK")
+        else:
+            self.logger.debug("Unhandled command: '%s'", packet)
+            self.sendPacket("")
+            
 
-    def queryHandler(self, packet):
+    def attachedHandler(self,packet):
         """
-        'q': Query packet
+        'qAttached': whether detach or kill will be used when quitting GDB
         """
-        if len(packet) > 1:
-            query = packet[1:]
-            self.logger.debug(query)
-            if query == "Attached":
-                self.sendPacket("0")
-                return
-            if "Supported" in query:
-                self.sendPacket("PacketSize={0:X}".format(self.packet_size))
-                self.dbg.software_breakpoint_clear_all()
-                return
-            if "Symbol::" in query:
-                self.sendPacket("OK")
-                return
-            if query[0] == "C":
-                self.sendPacket("")
-                return
-            if "Offsets" in query:
-                self.sendPacket("Text=000;Data=000;Bss=000")
-                return
-            if "Rcmd" in query:
-                payload = query.split(',')[1]
-                self.logger.debug("monitor command: %s",binascii.unhexlify(payload))
-                handleMonitorCommand(binascii.unhexlify(payload))
-                return
-        self.logger.debug("Unhandled query: %s", packet)
-        self.sendPacket("")
+        self.logger.debug("Attached query")
+        self.sendPacket("1")
 
+    def offsetsHandler(self, packet):
+        """
+        'qOffsets': Querying offsets of the different memory areas
+        """
+        self.logger.debug("Offset query")
+        self.sendPacket("Text=000;Data=000;Bss=000")
+
+    def monitorCmdHandler(self, packet):
+        """
+        'qRcmd': Monitor commands that directly get info or set values in the gdbserver
+        """
+        payload = packet[1:]
+        self.logger.debug("monitor command: %s",binascii.unhexlify(payload).decode('ascii'))
+        tokens = binascii.unhexlify(payload).decode('ascii').split()
+        if len(tokens) == 1:
+            tokens += [""]
+        if len(tokens) == 0 or "help".startswith(tokens[0]):
+            self.sendDebugMessage("monitor help                - this help text")
+            self.sendDebugMessage("monitor version             - print version")
+            self.sendDebugMessage("monitor debugwire [on|off]  - activate/deactivate debugWIRE mode")
+            self.sendDebugMessage("monitor reset               - reset MCU")
+            self.sendDebugMessage("monitor timer [freeze|run]  - freeze/run timers when stopped")
+            self.sendDebugMessage("monitor breakpoints [all|software|hardware]")
+            self.sendDebugMessage("                            - allow bps of a certain kind only")
+            self.sendDebugMessage("monitor singlestep [atomic|interruptible]")
+            self.sendDebugMessage("                            - single stepping mode")
+            self.sendDebugMessage("The first option is always the default one")
+            self.sendReplyPacket("If no parameter is specified, the current setting is printed")            
+        elif "version".startswith(tokens[0]):
+            self.sendReplyPacket("dw-gdbserver Version {}".format(VERSION))
+        elif "debugwire".startswith(tokens[0]):
+            self.sendReplyPacket("monitor debugwire NYI")
+        elif "reset".startswith(tokens[0]):
+            self.dbg.reset()
+            self.sendReplyPacket("MCU has been reset")
+        elif "timer".startswith(tokens[0]):
+            self.sendReplyPacket("timer NYI")
+        elif "breakpoints".startswith(tokens[0]):
+            self.sendReplyPacket("breakpoints NYI")
+        elif "singlestep".startswith(tokens[0]):
+            self.sendReplyPacket("singlestep NYI")
+        else:
+            self.sendReplyPacket("Unknown monitor command")
+
+    def sendReplyPacket(self, mes):
+        """
+        Send a packet as a reply to a monitor command to be displayed in the debug console
+        """
+        self.sendPacket(binascii.hexlify(bytearray((mes+de('utf-8'))).decode("ascii").upper()))
+
+    def sendDebugMessage(self, mes):
+        """
+        Send a packet that always should be displayed in the debug console
+        """
+        self.sendPacket('O' + binascii.hexlify(bytearray((mes+"\n").encode('utf-8'))).decode("ascii").upper())
+    
+    def supportedHandler(self, packet):
+        """
+        'qSupported': query for features supported by the gbdserver; in our case packet size and memory map
+        """
+        self.logger.debug("qSupported query")
+        self.sendPacket("PacketSize={0:X};qXfer:memory-map:read+".format(self.packet_size))
+        self.dbg.software_breakpoint_clear_all() # since this starts a GDB debug session
+
+    def firstThreadInfoHandler(self, packet):
+        """
+        'qfThreadInfoHandler': get info about active threads
+        """
+        self.logger.debug("First thread info query")
+        self.sendPacket("m01")
+
+    def subsequentThreadInfoHandler(self, packet):
+        """
+        'qsThreadInfoHandler': get more info about active threads
+        """
+        self.logger.debug("successive thread info query")
+        self.sendPacket("l") # the proviously given thread was the last one
+
+    def memoryMapHandler(self, packet):
+        """
+        'qXfer:memory-map:read' - provide info about memory map so that the vFlash commands are used
+        """
+        if ":memory-map:read" in packet: # include registers and IO regs in SRAM area
+            self.sendPacket(('l<memory-map><memory type="ram" start="{0}" length="{1}"/>' + \
+                             '<memory type="flash" start="{2}" length="{3}">' + \
+                             '<property name="blocksize">{4}</property>' + \
+                             '</memory></memory-map>').format(0 + 0x800000, \
+                             (self.dbg.memory_info.memory_info_by_name('internal_sram')['address'] + \
+                              self.dbg.memory_info.memory_info_by_name('internal_sram')['size']), \
+                              self.dbg.memory_info.memory_info_by_name('flash')['address'], \
+                              self.dbg.memory_info.memory_info_by_name('flash')['size'], \
+                              self.dbg.memory_info.memory_info_by_name('flash')['page_size']))
+            self.logger.debug("Memory map query")
+        else:
+            self.logger.debug("Unhandled query: qXfer%s", packet)
+            self.sendPacket("")
 
     def stepHandler(self, packet):
         """
         's': single step, perhaps starting a different address
         """
-        if len(packet) > 1:
-            addr = packet[1:]
-            self.logger.debug("Set PC to 0x%s",addr)
+        if packet:
+            self.logger.debug("Set PC to 0x%s",packet)
             #set PC - note, byte address converted to word address
-            self.dbg.program_counter_write(int(addr,16)>>1)
+            self.dbg.program_counter_write(int(packet,16)>>1)
         self.logger.debug("Single-step")
         self.dbg.step()
         self.sendPacket(SIGTRAP)
@@ -337,30 +422,49 @@ class GdbHandler():
         self.logger.debug("Thread alive: YES!");
         self.sendPacket('OK')
 
-    def vCommandHandler(self, packet):
+    def flashDoneHandler(self, packet):
         """
-        'v': v-commands; we cater for the following:
-        'vRun': reset and wait to be started from address 0
-        'vKill': ordinary kill command
-        We may latter support vFlashWrite, vFlashErase, and vFlashDone
+        'vFlashDone': everything is there, now we can start flashing! 
         """
-        if packet[0:4] == 'vRun':
-            self.logger.debug("(Re-)start the process and stop")
-            self.dbg.reset()
-            self.sendPacket(SIGTRAP)
-            self.last_SIGVAL = SIGTRAP
-        elif packet[0:5] == 'vKill':
-            self.logger.debug("Killing process")
-            self.dbg.reset()
-            self.sendPacket("OK")
-            if not self.extended_remote_mode:
-                raise EndOfSession
-            else:
-                self.kill_timeout = 1000
-                
-        else:
-            self.logger.debug("Unhandled command: %s", packet)
-            self.sendPacket("")
+        self.logger.debug("Flash done")
+        self.sendPacket("OK")            
+
+    def flashEraseHandler(self, packet):
+        """
+        'vFlashErase': we use the information in this command 
+         to prepare a buffer for the program we need to flash
+        """
+        self.logger.debug("Flash erase")
+        self.sendPacket("OK")
+        
+    def flashWriteHandler(self, packet):
+        """
+        'vFlashWrite': chunks of the program we need to flash
+        """
+        self.logger.debug("Flash write")
+        self.sendPacket("OK")
+
+    def killHandler(self, packet):
+        """
+        'vKill': Kill command. Will be called, when the user requests a 'kill', but also 
+        when in extended-remote mode, a 'run' is issued. In ordinary remote mode, it
+        will disconnect, in extended-remote it will not, and you can restart or load a modified 
+        file and run that one.
+        """
+        self.logger.debug("Killing process")
+        self.dbg.reset()
+        self.sendPacket("OK")
+        if not self.extended_remote_mode:
+            raise EndOfSession
+
+    def runHandler(self, packet):
+        """
+        'vRun': reset and wait to be started from address 0 
+        """
+        self.logger.debug("(Re-)start the process and stop")
+        self.dbg.reset()
+        self.sendPacket(SIGTRAP)
+        self.last_SIGVAL = SIGTRAP
 
     def setMemoryBinaryHandler(self, packet):
         """
@@ -370,12 +474,11 @@ class GdbHandler():
         self.logger.debug("Unhandled command: %s", packet)
         self.sendPacket("")
         
-
     def removeBreakpointHandler(self, packet):
         """
         'z': Remove a breakpoint
         """
-        breakpointType = packet[1]
+        breakpointType = packet[0]
         addr = packet.split(",")[1]
         self.logger.debug("Remove BP at %s", addr)
         if breakpointType == "0":
@@ -384,7 +487,7 @@ class GdbHandler():
             self.sendPacket("OK")
         elif breakpointType == "1":
             #HW breakpoint
-            self.dbg.hardware_breakpoint_clear()
+            self.dbg.software_breakpoint_clear(int(addr, 16))
             self.sendPacket("OK")
         else:
             #Not Supported
@@ -395,7 +498,7 @@ class GdbHandler():
         """
         'Z': Set a breakpoint
         """
-        breakpointType = packet[1]
+        breakpointType = packet[0]
         addr = packet.split(",")[1]
         self.logger.debug("Set BP at %s", addr)
         length = packet.split(",")[2]
@@ -405,53 +508,12 @@ class GdbHandler():
             self.sendPacket("OK")
         elif breakpointType == "1":
             #HW breakpoint
-            self.dbg.hardware_breakpoint_set(int(addr, 16))
+            self.dbg.software_breakpoint_set(int(addr, 16))
             self.sendPacket("OK")
         else:
             #Not Supported
             self.sendPacket("")
 
-    def handleMonitorCommand(self, cmd):
-        """
-        Monitor commands that directly manipulate the server
-        """
-        tokens = cmd.split()
-        if len(tokens) == 1:
-            tokens += [""]
-        if "help".startswith(tokens[0]):
-            self.sendDebugMessage("monitor help                - this help text")
-            self.sendDebugMessage("monitor version             - print version")
-            self.sendDebugMessage("monitor debugwire [on|off]  - activate/deactivate debugWIRE mode")
-            self.sendDebugMessage("monitor reset               - reset MCU")
-            self.sendDebugMessage("monitor timer [freeze|run]  - freeze/run timers when stopped")
-            self.sendDebugMessage("monitor breakbpoints [all|software|hardware]")
-            self.sendDebugMessage("                            - allow bps of a certain kind only")
-            self.sendDebugMessage("monitor singlestep [atomic|interruptible]")
-            self.sendDebugMessage("                            - single stepping mode")
-            self.sendDebugMessage("The first option is always the default one")
-            self.sendPacket("OK")
-        elif "version".startswith(tokens[0]):
-            self.sendReplyPacket("Version {}",VERSION)
-        elif "debugwire".startswith(token[0]):
-            self.sendReplyPacket("monitor debugwire NYI")
-        elif "reset".startswith(token[0]):
-            self.dbg.reset()
-            self.sendReplyPacket("MCU has been reset")
-        elif "timer".startswith(token[0]):
-            self.sendReplyPacket("timer NYI")
-        elif "breakpoints".startswith(token[0]):
-            self.sendReplyPacket("breakpoints NYI")
-        elif "singlestep".startswith(token[0]):
-            self.sendReplyPacket("singlestep NYI")
-        else:
-            self.sendReplyPacket("E09")
-
-    def sendReplyPacket(self, mes):
-        self.sendPacket(binascii.hexlify(bytearray(mes.encode('utf-8'))).decode("ascii").upper())
-
-    def sendDebugMessage(self, mes):
-        self.sendPacket('O' + binascii.hexlify(bytearray(mes.encode('utf-8'))).decode("ascii").upper())
-    
     def pollEvents(self):
         """
         Checks the AvrDebugger for incoming events (breaks)
@@ -461,10 +523,6 @@ class GdbHandler():
             self.logger.info("BREAK received")
             self.sendPacket(SIGTRAP)
             self.last_SIGVAL = SIGTRAP
-        if self.kill_timeout:
-            self.kill_timeout -= 1
-            if self.kill_timeout == 0:
-                raise EndOfSession
 
 
     def sendPacket(self, packetData):
@@ -479,13 +537,12 @@ class GdbHandler():
         self.socket.sendall(message.encode("ascii"))
 
     def handleData(self, data):
-        if data.decode("ascii").count("$") > 0:
-            for _ in range(data.decode("ascii").count("$")):
+        if data.count(b"$") > 0:
+            for _ in range(data.count(b"$")):
                 validData = True
-                data = data.decode("ascii")
-                checksum = (data.split("#")[1])[:2]
-                packet_data = (data.split("$")[1]).split("#")[0]
-                if int(checksum, 16) != sum(packet_data.encode("ascii")) % 256:
+                checksum = (data.split(b"#")[1])[:2]
+                packet_data = (data.split(b"$")[1]).split(b"#")[0]
+                if int(checksum, 16) != sum(packet_data) % 256:
                     self.logger.warning("Checksum Wrong in packet: %s", data)
                     validData = False
                 if validData:
@@ -494,7 +551,14 @@ class GdbHandler():
                 else:
                     self.socket.sendall(b"-")
                     self.logger.debug("<- -")
-                self.dispatch(packet_data)
+                # now split into command and data (or parameters) and dispatch
+                for i in range(len(packet_data)+1):
+                    if i == len(packet_data) or not chr(packet_data[i]).isalpha():
+                        break
+                if i == 0:
+                    i = 1 # the case that '!' and '?' are the command chars
+                self.dispatch(packet_data[:i].decode('ascii'),packet_data[i:])
+                data = (data.split(b"#")[1])[2:]
         elif data == b"\x03":
             self.logger.info("Stop")
             self.dbg.stop()
@@ -536,13 +600,14 @@ class AvrGdbRspServer(object):
             if ready[0]:
                 data = self.connection.recv(4096)
                 if len(data) > 0:
-                    self.logger.debug("-> %s", data.decode('ascii'))
+                    self.logger.debug("-> %s", data)
                     self.handler.handleData(data)
             self.handler.pollEvents()
 
 
     def __del__(self):
         self.handler.stopDebugSession() # stop debugWIRE if requested by user and disconnect from Debugger
+        time.sleep(1) # sleep 1 second before closing in order to allow the client to close first
         if self.connection:
             self.connection.close()
         if self.gdb_socket:

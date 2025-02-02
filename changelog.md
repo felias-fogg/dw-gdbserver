@@ -1,5 +1,19 @@
 # Changelog
 
+### V0.0.4 (2-Feb-2025)
+- extended-remote now stays in session after kill and can be restarted
+  with run
+- quit is always done with detach now (because we reply with "1" to qAttached)
+- the server now waits a second after having sent the detach so that
+  the client can close first, reducing the likelihood of an "address
+  already in use"
+- refactored things again in order to allow for binary payloads (X and
+  vFlashWrite); this also means that now each command gets its own handler
+- now providing a (mnimal) memory map in XML format so that GDB uses
+  the vFlash commands
+- providing the map means, however, that I now have to pretend to use hardware
+  breakpoints. 
+
 ### V0.0.3 (1-Feb-2025)
 
 - extended-remote works now (important when using Gede)
@@ -7,7 +21,6 @@
 - when starting a load command, at least the packets got interpreted
   the right way; in the original version the accepted packet size was
   much larger than the read block, which clashed
-
 
 ### V0.0.2 (31-Jan-2025)
 
