@@ -444,6 +444,47 @@ class GdbHandler():
         self.logger.debug("Flash write")
         self.sendPacket("OK")
 
+        ## Tuple of int values of characters that must be escaped.
+    _GDB_ESCAPED_CHARS = tuple(b'#$}*')
+
+    def escape(self, data):
+    """
+    Escape binary data to be sent to Gdb.
+
+    :param: data Bytes-like object containing raw binary.
+    :return: Bytes object with the characters in '#$}*' escaped as required by Gdb.
+    """
+    result = []
+    for c in data:
+        if c in tuple(b'#$}*'):
+            # Escape by prefixing with '}' and xor'ing the char with 0x20.
+            result += [0x7d, c ^ 0x20]
+        else:
+            result.append(c)
+    return bytes(result)
+
+    def unescape(self, data):
+    """
+    De-escapes binary data from Gdb.
+
+    :param: data Bytes-like object with possibly escaped values.
+    :return: List of integers in the range 0-255, with all escaped bytes de-escaped.
+    """
+    data_idx = 0
+
+    # unpack the data into binary array
+    result = list(data)
+
+    # check for escaped characters
+    while data_idx < len(result):
+        if result[data_idx] == 0x7d:
+            result.pop(data_idx)
+            result[data_idx] = result[data_idx] ^ 0x20
+        data_idx += 1
+
+    return result
+
+
     def killHandler(self, packet):
         """
         'vKill': Kill command. Will be called, when the user requests a 'kill', but also 
