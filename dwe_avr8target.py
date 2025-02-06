@@ -82,6 +82,52 @@ class DWETinyAvrTarget(TinyAvrTarget):
             # but no new EDBG firmware has/will be built)
             self.max_read_chunk_size = 256
 
+    def memtype_write_from_string(self, memtype_string):
+        """
+        Maps from a string to an avr8 memtype for writes
+
+        :param memtype_string: Friendly name of memory
+        :type memtype_string: str
+        :returns: Memory type identifier as defined in the protocol
+        :rtype: int
+        """
+        return(self.memtype_read_from_string(memtype_string))
+
+    ### This one is here only for debugging purposes        
+    def write_memory_section(self, memory_type, start_address, data_to_write, write_chunk_size, allow_blank_skip=False):
+        """
+        Writes a chunked section of memory
+
+        :param memory_type: Memory type identifier as defined in the protocol
+        :type memory_type: int
+        :param start_address: First address to write to
+        :type start_address: int
+        :param data_to_write: Raw data values to write
+        :type data_to_write: bytearray
+        :param write_chunk_size: Number of bytes in each separate write command to the debugger
+        :type write_chunk_size: int
+        :param allow_blank_skip: Allow skipping write of locations with value 0xFF
+        :type allow_blank_skip: boolean
+        """
+        # AVR8 protocol packet framer limit
+        if write_chunk_size > self.max_write_chunk_size:
+            write_chunk_size = self.max_write_chunk_size
+
+        total_bytes_to_write = len(data_to_write)
+        if write_chunk_size > total_bytes_to_write:
+            write_chunk_size = total_bytes_to_write
+
+        while data_to_write:
+            chunk = data_to_write[0:write_chunk_size]
+            self.logger.debug("Chunk to write: %s", chunk)
+            self.logger.debug("memtype: %s", memory_type)
+            if not self.skip_blank_pages or not self.is_blank(chunk) or not allow_blank_skip:
+                self.protocol.memory_write(memory_type, start_address, chunk)
+            start_address += write_chunk_size
+            data_to_write = data_to_write[write_chunk_size:]
+
+
+
 
     def setup_config(self, device_info):
         """

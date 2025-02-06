@@ -1,34 +1,43 @@
 # Changelog
 
+### V0.0.5 (6-Feb-2005)
+
+- implemented flash programming
+- check memory page before flashing in order to avoid flashing identical contents
+
+- rewrote "handleData" so that it is now able to cope with NAKs (which are very unlikely)
+
 ### V0.0.4 (2-Feb-2025)
-- extended-remote now stays in session after kill and can be restarted
-  with run
-- quit is always done with detach now (because we reply with "1" to qAttached)
+
+- in extended-remote mode, one stays now in session after a "kill"
+  command, and the program can be restarted with "run"
+- quit is now done with "detach" (because we reply with "1" to "qAttached"), and it is not possible to re-attach after detaching!
 - the server now waits a second after having sent the detach so that
   the client can close first, reducing the likelihood of an "address
-  already in use"
+  already in use" error
 - refactored things again in order to allow for binary payloads (X and
-  vFlashWrite); this also means that now each command gets its own handler
-- now providing a (mnimal) memory map in XML format so that GDB uses
+  vFlashWrite)
+- each command now has its own handler
+- the server now provides a (minimal) memory map in XML format so that GDB uses
   the vFlash commands
-- providing the map means, however, that I now have to pretend to use hardware
-  breakpoints. 
+- providing the map means, however, that we now have to pretend to use hardware
+  breakpoints
 
 ### V0.0.3 (1-Feb-2025)
 
 - extended-remote works now (important when using Gede)
 - kill/quit/detach do now the reasonable things
 - when starting a load command, at least the packets got interpreted
-  the right way; in the original version the accepted packet size was
+  the right way; in the original version, the accepted packet size was
   much larger than the read block, which clashed
 
 ### V0.0.2 (31-Jan-2025)
 
-- Refactoring of the GdbHandler class. Looks much better now, but the functionaliy is the same. 
+- Refactoring of the GdbHandler class. It looks much better now, but the functionality is the same. 
 
 ### V0.0.1 (30-Jan-2025)
 
-- Almost all packets are handled. In particular the load function is not there yet, and no support for X-packages.
+- Almost all packets are handled. In particular, the load function is not there yet, and there is no support for X-packages.
 
 ### V0.0.0-pre1 (24-Jan-2025)
 
@@ -37,5 +46,5 @@
   - dwe_avrdebug.py
   - dwe_nvmdebugwire.py
 
-- In addition, I prepared a new deviceinfo/devices folder, which will be populated with all the devices that are going to be supported
+- In addition, I prepared a new deviceinfo/devices folder, which will be populated with all the devices that will be supported.
 

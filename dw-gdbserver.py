@@ -1,7 +1,7 @@
 """
 debugWIRE GDBServer 
 """
-VERSION="0.0.4"
+VERSION="0.0.5"
 
 SIGHUP  = "S01"     # connection to target lost
 SIGINT  = "S02"     # Interrupt  - user interrupted the program (UART ISR) 
@@ -54,11 +54,13 @@ class GdbHandler():
         self.socket = socket
         self.dbg = avrdebugger
         self.last_SIGVAL = "S00"
-        self.packet_size = 200
+        self.packet_size = 4000
         self.keep_dw_enabled = False
         self.connected = False
         self.dw_mode_active = False
         self.extended_remote_mode = False
+        self.flash = {} # indexed by the start address, these are pairs [endaddr, data]
+        self.vflashdone = False # set to True after vFlashDone received and will then trigger clearing the flash cache 
 
         self.packettypes = {
             '!'           : self.extendedRemoteHandler,
@@ -426,7 +428,30 @@ class GdbHandler():
         """
         'vFlashDone': everything is there, now we can start flashing! 
         """
-        self.logger.debug("Flash done")
+        self.vflashdone = True
+        pagesize = self.dbg.memory_info.memory_info_by_name('flash')['page_size']
+        self.logger.info("Starting to flash ...")
+        memtype = self.dbg.device.avr.memtype_write_from_string('flash')
+        for chunkaddr in sorted(self.flash):
+            i = chunkaddr + len(self.flash[chunkaddr][1])
+            while i < self.flash[chunkaddr][0]:
+                self.flash[chunkaddr][1].append(0xFF)
+                i += 1
+            # now send it page by page
+            pgaddr = chunkaddr
+            while pgaddr < self.flash[chunkaddr][0]:
+                self.logger.debug("Flashing page starting at 0x%X", pgaddr)
+                currentpage = self.dbg.flash_read(pgaddr, pagesize)
+                if currentpage == self.flash[chunkaddr][1][pgaddr-chunkaddr:pgaddr-chunkaddr+pagesize]:
+                    self.logger.debug("Skip flashing page because already flashed at 0x%X", pgaddr)
+                else:
+                    self.dbg.device.avr.write_memory_section(memtype,
+                                                             pgaddr,
+                                                             self.flash[chunkaddr][1][pgaddr-chunkaddr:pgaddr-chunkaddr+pagesize],
+                                                             pagesize,
+                                                             allow_blank_skip=False)
+                pgaddr += pagesize
+        self.logger.info("Flash done")
         self.sendPacket("OK")            
 
     def flashEraseHandler(self, packet):
@@ -434,55 +459,78 @@ class GdbHandler():
         'vFlashErase': we use the information in this command 
          to prepare a buffer for the program we need to flash
         """
-        self.logger.debug("Flash erase")
+
+        if self.vflashdone:
+            self.vflashdone = False
+            self.flash = {} # clear flash (might be a re-load)
+        addrstr, sizestr = packet[1:].split(',')
+        addr = int(addrstr, 16)
+        size = int(sizestr, 16)
+        self.logger.debug("Flash erase: 0x%s, 0x%s", addr, size)
+        self.flash[addr] = [ addr+size, bytearray() ]
         self.sendPacket("OK")
         
     def flashWriteHandler(self, packet):
         """
         'vFlashWrite': chunks of the program we need to flash
         """
-        self.logger.debug("Flash write")
-        self.sendPacket("OK")
-
-        ## Tuple of int values of characters that must be escaped.
-    _GDB_ESCAPED_CHARS = tuple(b'#$}*')
+        addrstr = (packet.split(b':')[1]).decode('ascii')
+        data = self.unescape(packet[len(addrstr)+2:])
+        addr = int(addrstr, 16)
+        self.logger.debug("Flash write starting at 0x%X", addr)
+        #find right chunk
+        for chunkaddr in self.flash:
+            if chunkaddr <= addr and addr < self.flash[chunkaddr][0]: # right chunk found
+                i = chunkaddr + len(self.flash[chunkaddr][1])
+                while i < addr:
+                    self.flash[chunkaddr][1].append(0xFF)
+                    i += 1
+                self.flash[chunkaddr][1].extend(data)
+                if len(self.flash[chunkaddr][1]) + chunkaddr >= self.flash[chunkaddr][0]: # should not happen
+                    self.debugger.error("Address out of range in packet vFlashWrite: 0x%X", addr)
+                    self.sendPacket("E03")
+                else:
+                    self.sendPacket("OK")
+                return
+        self.debugger.error("No previous vFlashErase packet for vFlashWrite at: 0x%X", addr)
+        self.sendPacket("E03")
 
     def escape(self, data):
-    """
-    Escape binary data to be sent to Gdb.
+        """
+        Escape binary data to be sent to Gdb.
 
-    :param: data Bytes-like object containing raw binary.
-    :return: Bytes object with the characters in '#$}*' escaped as required by Gdb.
-    """
-    result = []
-    for c in data:
-        if c in tuple(b'#$}*'):
-            # Escape by prefixing with '}' and xor'ing the char with 0x20.
-            result += [0x7d, c ^ 0x20]
-        else:
-            result.append(c)
-    return bytes(result)
+        :param: data Bytes-like object containing raw binary.
+        :return: Bytes object with the characters in '#$}*' escaped as required by Gdb.
+        """
+        result = []
+        for c in data:
+            if c in tuple(b'#$}*'):
+                # Escape by prefixing with '}' and xor'ing the char with 0x20.
+                result += [0x7d, c ^ 0x20]
+            else:
+                result.append(c)
+        return bytes(result)
 
     def unescape(self, data):
-    """
-    De-escapes binary data from Gdb.
+        """
+        De-escapes binary data from Gdb.
+        
+        :param: data Bytes-like object with possibly escaped values.
+        :return: List of integers in the range 0-255, with all escaped bytes de-escaped.
+        """
+        data_idx = 0
 
-    :param: data Bytes-like object with possibly escaped values.
-    :return: List of integers in the range 0-255, with all escaped bytes de-escaped.
-    """
-    data_idx = 0
+        # unpack the data into binary array
+        result = list(data)
 
-    # unpack the data into binary array
-    result = list(data)
+        # check for escaped characters
+        while data_idx < len(result):
+            if result[data_idx] == 0x7d:
+                result.pop(data_idx)
+                result[data_idx] = result[data_idx] ^ 0x20
+            data_idx += 1
 
-    # check for escaped characters
-    while data_idx < len(result):
-        if result[data_idx] == 0x7d:
-            result.pop(data_idx)
-            result[data_idx] = result[data_idx] ^ 0x20
-        data_idx += 1
-
-    return result
+        return result
 
 
     def killHandler(self, packet):
@@ -575,11 +623,32 @@ class GdbHandler():
         if packetData == "":
             message = "$#00"
         self.logger.debug("<- %s", message)
+        self.lastmessage = message
         self.socket.sendall(message.encode("ascii"))
 
     def handleData(self, data):
-        if data.count(b"$") > 0:
-            for _ in range(data.count(b"$")):
+        while data:
+            if data[0] == ord('+'): # ACK
+                self.logger.debug("-> +")
+                self.lastmessage = None
+                data = data[1:]
+            elif data[0] == ord('-'): # NAK, resend last message
+                self.logger.debug("-> -")
+                if (self.lastmessage):
+                    self.logger.warning("Resending packet to GDB: %s", self.lastmessage)
+                    self.sendPacket(self.lastmessage)
+                else:
+                    self.logger.error("NAK, but no previous packet")
+                    self.sendPacket("")
+                data = data[1:]
+            elif data[0] == 3: # CTRL-C
+                self.logger.info("Stop")
+                self.dbg.stop()
+                self.sendPacket(SIGTRAP)
+                self.socket.sendall(b"+")
+                self.logger.debug("<- +")
+                data = data[1:]
+            elif data[0] == ord('$'): # start of message
                 validData = True
                 checksum = (data.split(b"#")[1])[:2]
                 packet_data = (data.split(b"$")[1]).split(b"#")[0]
@@ -600,12 +669,6 @@ class GdbHandler():
                     i = 1 # the case that '!' and '?' are the command chars
                 self.dispatch(packet_data[:i].decode('ascii'),packet_data[i:])
                 data = (data.split(b"#")[1])[2:]
-        elif data == b"\x03":
-            self.logger.info("Stop")
-            self.dbg.stop()
-            self.sendPacket(SIGTRAP)
-            self.socket.sendall(b"+")
-            self.logger.debug("<- +")
 
     def stopDebugSession(self):
         """
@@ -615,6 +678,26 @@ class GdbHandler():
         """
         self.dbg.stop_debugging()
 
+
+class BreakpointManager(object):
+    def __init__(self, handler, hwps):
+        self.handler = handler
+        self.hwps = hwps
+
+    def cleanup(self):
+        pass
+
+    def newbp(self, addr):
+        pass
+
+    def removebp(self, addr):
+        pass
+
+    def resume(self, addr):
+        pass
+
+    def step(self, addr):
+        pass
 
 class AvrGdbRspServer(object):
     def __init__(self, avrdebugger, port):
