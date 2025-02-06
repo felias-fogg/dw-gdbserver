@@ -1,8 +1,12 @@
 # Changelog
 
+### V0.0.8 (6-Feb-2025)
+
+- Check first on whether there are potential debuggers at all and if not, we start dw-link immediately
+
 ### V0.0.7 (6-Feb-2025)
 
-- integrated the dw-server script; you can now require the tool `dwlink` or it will be tried as the last alternative if no other debuggers are found; the reason for being last is that the discovery process for dw-link can take some time
+- integrated the dw-server script as the slightly rewritten dwlink module; you can now require the tool `dwlink` or it will be tried as the last alternative if no other debuggers are found; the reason for being last is that the discovery process for dw-link can take some time
 
 ### V0.0.6 (6-Feb-2025)
 

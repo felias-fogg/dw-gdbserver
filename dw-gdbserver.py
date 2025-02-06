@@ -1,7 +1,7 @@
 """
 debugWIRE GDBServer 
 """
-VERSION="0.0.7"
+VERSION="0.0.8"
 
 SIGHUP  = "S01"     # connection to target lost
 SIGINT  = "S02"     # Interrupt  - user interrupted the program (UART ISR) 
@@ -12,9 +12,9 @@ SIGTERM = "S15"     # Cannot execute because not in dW mode
 
 import site
 
-site.addsitedir("../pyedbglib")
-site.addsitedir("../pymcuprog")
-site.addsitedir("../../Library/Python/3.13/lib/python/site-packages")
+#site.addsitedir("../pyedbglib")
+#site.addsitedir("../pymcuprog")
+#site.addsitedir("../../Library/Python/3.13/lib/python/site-packages")
 
 # args, logging
 import time
@@ -30,6 +30,7 @@ import socket
 import select
 import binascii
 import time
+import usb
 
 from pyedbglib.hidtransport.hidtransportfactory import hid_transport
 import pymcuprog
@@ -820,7 +821,15 @@ def main():
         print("dw-gdbserver version {}".format(VERSION))
         return 0
 
-    if args.tool == "dwlink":
+    # look for VID/PIDs of possible debuggers
+    usbdevices = usb.core.find(find_all=True, idVendor=0x03EB)
+    nousb = True
+    for device in usbdevices:
+        if device.idVendor == 0x03EB and \
+            device.idProduct in [ 0x2140,  0x2141, 0x2144,  0x2111, 0x216A, 0x2145, 0x2175, 0x2177, 0x2180]:
+            nousb = False
+
+    if args.tool == "dwlink" or (nousb and not args.tool):
         dwlink.main(args)
         return
         
