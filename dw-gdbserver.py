@@ -149,12 +149,13 @@ class GdbHandler():
 
     def getRegisterHandler(self, packet):
         """
-        'g': Send the current register values R[0:31] + SREAG + SP to GDB
+        'g': Send the current register values R[0:31] + SREAG + SP + PC to GDB
         """
         self.logger.debug("GDB reading registers: %s", packet)
         regs = self.dbg.register_file_read()
         sreg = self.dbg.status_register_read()
         sp = self.dbg.stack_pointer_read()
+        pc = self.dbg.program_counter_read() << 1 # get PC as word adress
         regString = ""
         for reg in regs:
             regString = regString + format(reg, '02x')
@@ -164,18 +165,20 @@ class GdbHandler():
         spString = ""
         for reg in sp:
             spString = spString + format(reg, '02x')
-        regString = regString + sregString + spString
+        pcstring = binascii.hexlify(pc.to_bytes(4,byteorder='little')).decode('ascii')
+        regString = regString + sregString + spString + pcstring
         self.sendPacket(regString)
 
     def setRegisterHandler(self, packet):
         """
-        'G': Receive new register ( R[0:31] + SREAG + SP) values from GDB
+        'G': Receive new register ( R[0:31] + SREAG + SP + PC) values from GDB
         """
         newRegData = int(packet,16)
         newdata = newRegData.to_bytes(35, byteorder='big')
         self.dbg.register_file_write(newdata[:32])
         self.dbg.status_register_write(newdata[32:33])
-        self.dbg.stack_pointer_write(newdata[33:])
+        self.dbg.stack_pointer_write(newdata[33:35])
+        self.dbg.program_counter_write(int(binascii.hexlify(int(newdata[35:],16).to_bytes(4,byteorder='little'))) >> 1)
         self.logger.debug("Setting new register data from GDB: %s", newRegData)
         self.sendPacket("OK")
 
@@ -277,27 +280,42 @@ class GdbHandler():
         """
         if packet == "22":
             # GDB defines PC register for AVR to be REG34(0x22)
-            # end the bytes have to be given in reverse order (big endian)
+            # and the bytes have to be given in reverse order (big endian)
             pc = self.dbg.program_counter_read()
-            self.logger.debug("get PC command: {:X}".format(pc))
+            self.logger.debug("get PC command: 0x{:X}".format(pc))
             pcByteString = binascii.hexlify((pc << 1).to_bytes(4,byteorder='little')).decode('ascii')
             self.sendPacket(pcByteString)
-            return
-        self.logger.debug("Unhandled command: '%s'", packet)
-        self.sendPacket("")
+        elif packet == "21": # SP
+            spByteString = (binascii.hexlify(self.dbg.stack_pointer_read())).decode('ascii')
+            self.logger.debug("get SP command: 0x%s", spByteString)
+            self.sendPacket(spByteString)
+        elif packet == "20": # SREG
+            sregByteString =  (binascii.hexlify(self.dbg.status_register_read())).decode('ascii')
+            self.logger.debug("get SREG command: 0x%s", sregByteString)
+            self.sendPacket(sregByteString)
+        else:
+            regByteString =  (binascii.hexlify(self.dbg.sram_read(int(packet,16), 1))).decode('ascii')
+            self.logger.debug("get Reg%s command: 0x%s", regByteString)
+            self.sendPacket(regByteString)            
         
     def setOneRegisterHandler(self, packet):
         """
         'P': set a single register with a new value given by GDB
         """
-        if packet[0:3] == "22=":
+        if packet[0:3] == "22=": # PC
             self.logger.debug("set PC command")
             pc = int(binascii.hexlify(int(packet[3:],16).to_bytes(4,byteorder='little'))) >> 1
             self.dbg.program_counter_write(pc)
-            self.sendPacket("OK")
+        elif packet[0:3] == "21=": # SP (already in right order)
+            self.logger.debug("set SP command")
+            self.dbg.stack_pointer_write(binascii.unhexlify(packet[3:]))
+        elif packet[0:3] == "20=": # SREG
+            self.logger.debug("set SREG command")
+            self.dbg.status_register_write(binascii.unhexlify(packet[3:]))
         else:
-            self.logger.debug("Unhandled command: '%s'", packet)
-            self.sendPacket("")
+            self.logger.debug("set REG%d command",int(packet[0:2],16) )
+            self.dbg.sram_write(int(packet[0:2],16), binascii.unhexlify(packet[3:]))
+        self.sendPacket("OK")
             
 
     def attachedHandler(self,packet):

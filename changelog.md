@@ -1,9 +1,13 @@
 # Changelog
 
+### V0.0.6 (6-Feb-2025)
+
+- adding support for single register get/set
+
 ### V0.0.5 (6-Feb-2005)
 
-- implemented flash programming
-- check memory page before flashing in order to avoid flashing identical contents
+- flash programming has been implemented
+- now, each memory page is checked before flashing in order to avoid flashing identical contents, speeds up loading from 1kB/sec to 14kB/sec
 
 - rewrote "handleData" so that it is now able to cope with NAKs (which are very unlikely)
 
@@ -21,7 +25,7 @@
 - the server now provides a (minimal) memory map in XML format so that GDB uses
   the vFlash commands
 - providing the map means, however, that we now have to pretend to use hardware
-  breakpoints
+  breakpoints, because GDB believes that flash memory is read-only
 
 ### V0.0.3 (1-Feb-2025)
 
