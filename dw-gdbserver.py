@@ -1,7 +1,7 @@
 """
 debugWIRE GDBServer 
 """
-VERSION="0.0.5"
+VERSION="0.0.6"
 
 SIGHUP  = "S01"     # connection to target lost
 SIGINT  = "S02"     # Interrupt  - user interrupted the program (UART ISR) 
@@ -834,7 +834,7 @@ def main():
         device = args.dev
     elif args.dev:
         if arg.dev != device:
-            print("Expected MCU:", args.mcu %s,", attached MCU: %s", device)
+            print("*** Expected MCU:", args.mcu %s,", attached MCU: %s", device)
             sys.exit(1)
 
     if not device:
