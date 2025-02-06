@@ -1,7 +1,7 @@
 """
 debugWIRE GDBServer 
 """
-VERSION="0.0.6"
+VERSION="0.0.7"
 
 SIGHUP  = "S01"     # connection to target lost
 SIGINT  = "S02"     # Interrupt  - user interrupted the program (UART ISR) 
@@ -38,6 +38,8 @@ from dwe_avrdebugger import DWEAvrDebugger
 from pymcuprog.backend import Backend
 from pymcuprog.pymcuprog_main import _setup_tool_connection
 
+# alternative debug server
+import dwlink
 
 class EndOfSession(Exception):
     """Termination of session"""
@@ -356,7 +358,13 @@ class GdbHandler():
         elif "version".startswith(tokens[0]):
             self.sendReplyPacket("dw-gdbserver Version {}".format(VERSION))
         elif "debugwire".startswith(tokens[0]):
-            self.sendReplyPacket("monitor debugwire NYI")
+            if tokens[1][0:2] == "on":
+                self.sendReplyPacket("'monitor debugwire on' NYI")
+                self.keep_dw_enabled = True
+            elif tokens[1][0:2] == "of":
+                self.keep_dw_enabled = False
+                self.dbg.device.avr.protocol.debugwire_disable()
+                self.sendReplyPacket("debugWIRE mode is now disabled")
         elif "reset".startswith(tokens[0]):
             self.dbg.reset()
             self.sendReplyPacket("MCU has been reset")
@@ -373,7 +381,7 @@ class GdbHandler():
         """
         Send a packet as a reply to a monitor command to be displayed in the debug console
         """
-        self.sendPacket(binascii.hexlify(bytearray((mes+de('utf-8'))).decode("ascii").upper()))
+        self.sendPacket(binascii.hexlify(bytearray((mes+"\n").encode('utf-8'))).decode("ascii").upper())
 
     def sendDebugMessage(self, mes):
         """
@@ -785,7 +793,7 @@ def main():
     # Tool to use
     parser.add_argument("-t", "--tool",
                             type=str, choices=['atmelice', 'edbg', 'icd4', 'ice4', 'jtagice3', 'medbg', 'nedbg',
-                                                   'pickit4', 'powerdebugger', 'snap', 'dw-link'],
+                                                   'pickit4', 'powerdebugger', 'snap', 'dwlink'],
                             help="tool to connect to")
 
     parser.add_argument("-u", "--usbsn",
@@ -805,13 +813,17 @@ def main():
     args = parser.parse_args()
 
     # Setup logging
-    logging.basicConfig(stream=sys.stdout,level=args.verbose.upper())
+    logging.basicConfig(stream=sys.stderr,level=args.verbose.upper())
 
     logger = getLogger()
     if args.version:
         print("dw-gdbserver version {}".format(VERSION))
         return 0
 
+    if args.tool == "dwlink":
+        dwlink.main(args)
+        return
+        
     # Use pymcuprog backend for initial connection here
     backend = Backend()
     toolconnection = _setup_tool_connection(args)
@@ -824,7 +836,7 @@ def main():
         device = backend.read_kit_device()
 
     except pymcuprog.pymcuprog_errors.PymcuprogToolConnectionError:
-        print("*** No debugging tool found ***")
+        dwlink.main(args)
         sys.exit(1)
         
     finally:
