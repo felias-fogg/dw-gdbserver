@@ -1,6 +1,5 @@
 """
 Required device info for the ATmega328P device
-Note: this model is incomplete and is for Microchip internal regression test purposes only
 """
 from pymcuprog.deviceinfo.eraseflags import ChiperaseEffect
 
@@ -71,7 +70,7 @@ DEVICE_INFO = {
     'eeprom_chiperase_effect': ChiperaseEffect.CONDITIONALLY_ERASED_AVR,
     'eeprom_isolated_erase': False,
 
-    # Some extra AVR specific fields
+    # Some extra specific fields for debugWIRE MCUs
     'ocd_base' : 0x31,
     'ocd_rev' : 0x01,
     'eearh_base' : 0x22,
@@ -80,6 +79,8 @@ DEVICE_INFO = {
     'eedr_base' : 0x20,
     'spmcr_base' : 0x57,
     'osccal_base' : 0x66,
+    'dwen_fusebit' : 0x40, # always high fuse
+    'bootrst_fuse': 1, # it is bit 0 of the high fuse 
     'interface': 'ISP+DW',
     'device_id': 0x1E950F,
 }

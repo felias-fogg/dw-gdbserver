@@ -1,8 +1,21 @@
 # Changelog
 
+### V0.0.9 (7-Feb-2025)
+
+- `monitor debugwire on` now first tries ISP and will ask for power-cycle
+- if ISP does not work, we switch directly DW on
+- `monitor debugwire off`  only works once, but this is OK!
+- the device parameter is now tested against DW and ISP targets
+- multiple NAKs caused by time-outs waiting for power-cycling are bulk deleted
+- implemented a callback function when calling `dbg.setup_session` for notifying in the debug console that a power-cycle is necessary
+- Added `dwe_nvmspi.py` in order to suppress the warning message in the initial method
+
 ### V0.0.8 (6-Feb-2025)
 
-- Check first on whether there are potential debuggers at all and if not, we start dw-link immediately
+- check first on whether there are potential debuggers at all and if not, we start dw-link immediately
+- checked for each command that dw_mode is active; if not an error reply is given 
+- added field `dwen_fuse` to the device description for debugWIRE devices (its always in the high fuse)
+- in avrdebug.py, put part of `setup_session`  into `__init__` so that device and memory infos are available before connecting to the device
 
 ### V0.0.7 (6-Feb-2025)
 

@@ -1,19 +1,18 @@
 """
 debugWIRE GDBServer 
 """
-VERSION="0.0.8"
+VERSION="0.0.9"
 
 SIGHUP  = "S01"     # connection to target lost
 SIGINT  = "S02"     # Interrupt  - user interrupted the program (UART ISR) 
 SIGILL  = "S04"     # Illegal instruction
 SIGTRAP = "S05"     # Trace trap  - stopped on a breakpoint
 SIGABRT = "S06"     # Abort because of some fatal error
-SIGTERM = "S15"     # Cannot execute because not in dW mode
 
 import site
 
-#site.addsitedir("../pyedbglib")
-#site.addsitedir("../pymcuprog")
+site.addsitedir("../pyedbglib")
+site.addsitedir("../pymcuprog")
 #site.addsitedir("../../Library/Python/3.13/lib/python/site-packages")
 
 # args, logging
@@ -35,11 +34,13 @@ import usb
 from pyedbglib.hidtransport.hidtransportfactory import hid_transport
 import pymcuprog
 from pymcuprog.avrdebugger import AvrDebugger
-from dwe_avrdebugger import DWEAvrDebugger
+from dwe_avrdebugger import DWEAvrDebugger, FatalErrorException
 from pymcuprog.backend import Backend
 from pymcuprog.pymcuprog_main import _setup_tool_connection
+from pymcuprog.nvmspi import NvmAccessProviderCmsisDapSpi
+from pymcuprog.deviceinfo import deviceinfo
 
-# alternative debug server
+# alternative debug server that connects to the dw-link hardware debugger
 import dwlink
 
 class EndOfSession(Exception):
@@ -52,15 +53,16 @@ class GdbHandler():
     GDB handler
     Maps between incoming GDB requests and AVR debugging protocols (via pymcuprog)
     """
-    def __init__ (self, socket, avrdebugger):
+    def __init__ (self, socket, avrdebugger, devicename, powercycle=True):
         self.logger = getLogger(__name__)
         self.socket = socket
         self.dbg = avrdebugger
+        self.devicename = devicename
+        self.powercycle = powercycle
         self.last_SIGVAL = "S00"
         self.packet_size = 4000
-        self.keep_dw_enabled = False
-        self.connected = False
         self.dw_mode_active = False
+        self.dw_deactivated_once = False
         self.extended_remote_mode = False
         self.flash = {} # indexed by the start address, these are pairs [endaddr, data]
         self.vflashdone = False # set to True after vFlashDone received and will then trigger clearing the flash cache 
@@ -135,6 +137,11 @@ class GdbHandler():
         'c': Continue execution, either at current address or at given address
         """
         self.logger.debug("Continue")
+        if not self.dw_mode_active:
+            self.sendDebugMessage("Enable debugWIRE first: 'monitor debugwire on'")
+            self.sendPacket("E05")
+            self.last_SIGVAL = SIGABRT
+            return
         if packet:
             self.logger.debug("Set PC to 0x%s",packet)
             #set PC - note, byte address converted to word address
@@ -143,10 +150,9 @@ class GdbHandler():
 
     def detachHandler(self, packet):
         """
-        'D': Just reset MCU. All the real housekeeping will take place when the connection is terminated
+        'D': Detach. All the real housekeeping will take place when the connection is terminated
         """
         self.logger.debug("Detaching ...")
-        self.dbg.reset()
         self.sendPacket("OK")
         raise EndOfSession("Session ended by client ('detach')")
 
@@ -154,35 +160,39 @@ class GdbHandler():
         """
         'g': Send the current register values R[0:31] + SREAG + SP + PC to GDB
         """
-        self.logger.debug("GDB reading registers: %s", packet)
-        regs = self.dbg.register_file_read()
-        sreg = self.dbg.status_register_read()
-        sp = self.dbg.stack_pointer_read()
-        pc = self.dbg.program_counter_read() << 1 # get PC as word adress
-        regString = ""
-        for reg in regs:
-            regString = regString + format(reg, '02x')
-        sregString = ""
-        for reg in sreg:
-            sregString = sregString + format(reg, '02x')
-        spString = ""
-        for reg in sp:
-            spString = spString + format(reg, '02x')
-        pcstring = binascii.hexlify(pc.to_bytes(4,byteorder='little')).decode('ascii')
-        regString = regString + sregString + spString + pcstring
-        self.sendPacket(regString)
+        self.logger.debug("GDB reading registers")
+        if self.dw_mode_active:
+            regs = self.dbg.register_file_read()
+            sreg = self.dbg.status_register_read()
+            sp = self.dbg.stack_pointer_read()
+            pc = self.dbg.program_counter_read() << 1 # get PC as word adress
+            regString = ""
+            for reg in regs:
+                regString = regString + format(reg, '02x')
+            sregString = ""
+            for reg in sreg:
+                sregString = sregString + format(reg, '02x')
+            spString = ""
+            for reg in sp:
+                spString = spString + format(reg, '02x')
+            pcstring = binascii.hexlify(pc.to_bytes(4,byteorder='little')).decode('ascii')
+            regString = regString + sregString + spString + pcstring
+            self.sendPacket(regString)
+        else:
+            self.sendPacket("0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f2000341200000000")
 
     def setRegisterHandler(self, packet):
         """
         'G': Receive new register ( R[0:31] + SREAG + SP + PC) values from GDB
         """
-        newRegData = int(packet,16)
-        newdata = newRegData.to_bytes(35, byteorder='big')
-        self.dbg.register_file_write(newdata[:32])
-        self.dbg.status_register_write(newdata[32:33])
-        self.dbg.stack_pointer_write(newdata[33:35])
-        self.dbg.program_counter_write(int(binascii.hexlify(int(newdata[35:],16).to_bytes(4,byteorder='little'))) >> 1)
-        self.logger.debug("Setting new register data from GDB: %s", newRegData)
+        if self.dw_mode_active:
+            newRegData = int(packet,16)
+            newdata = newRegData.to_bytes(35, byteorder='big')
+            self.dbg.register_file_write(newdata[:32])
+            self.dbg.status_register_write(newdata[32:33])
+            self.dbg.stack_pointer_write(newdata[33:35])
+            self.dbg.program_counter_write(int(binascii.hexlify(int(newdata[35:],16).to_bytes(4,byteorder='little'))) >> 1)
+            self.logger.debug("Setting new register data from GDB: %s", newRegData)
         self.sendPacket("OK")
 
     def setThreadHandler(self, packet):
@@ -196,6 +206,9 @@ class GdbHandler():
         """
         'm': provide GDB with memory contents
         """
+        if not self.dw_mode_active:
+            self.sendPacket("E05")
+            return
         addr = packet.split(",")[0]
         size = packet.split(",")[1]
         self.logger.debug("Reading memory: addr=%s, size=%d", addr, int(size,16))
@@ -238,6 +251,9 @@ class GdbHandler():
         """
         'M': GDB sends new data for MCU memory
         """
+        if not self.dw_mode_active:
+            self.sendPacket("E05")
+            return
         addr = packet.split(",")[0]
         size = (packet.split(",")[1]).split(":")[0]
         data = (packet.split(",")[1]).split(":")[1]
@@ -281,6 +297,9 @@ class GdbHandler():
         'p': read register and send to GDB
         currently only PC
         """
+        if not self.dw_mode_active:
+            self.sendPacket("E05")
+            return
         if packet == "22":
             # GDB defines PC register for AVR to be REG34(0x22)
             # and the bytes have to be given in reverse order (big endian)
@@ -305,6 +324,9 @@ class GdbHandler():
         """
         'P': set a single register with a new value given by GDB
         """
+        if not self.dw_mode_active:
+            self.sendPacket("E05")
+            return
         if packet[0:3] == "22=": # PC
             self.logger.debug("set PC command")
             pc = int(binascii.hexlify(int(packet[3:],16).to_bytes(4,byteorder='little'))) >> 1
@@ -360,12 +382,31 @@ class GdbHandler():
             self.sendReplyPacket("dw-gdbserver Version {}".format(VERSION))
         elif "debugwire".startswith(tokens[0]):
             if tokens[1][0:2] == "on":
-                self.sendReplyPacket("'monitor debugwire on' NYI")
-                self.keep_dw_enabled = True
+                if self.dw_deactivated_once:
+                    self.sendDebugMessage("Cannot reactivate debugWIRE")
+                    self.sendReplyPacket("You have to restart the debugger")
+                else:
+                    if not self.dw_mode_active:
+                        # Attach debugger
+                        self.logger.debug("Attaching AvrDebugger to device: %s", self.devicename)
+                        if self.powercycle:
+                            opt = {'callback': self.sendPowerCycle}
+                        else:
+                            opt = ""
+                        self.dbg.setup_session(self.devicename, options=opt)
+                        self.dbg.start_debugging()
+                        self.logger.debug("Attached")
+                        self.dw_mode_active = True
+                    self.sendReplyPacket("debugWIRE mode is enabled")
             elif tokens[1][0:2] == "of":
-                self.keep_dw_enabled = False
-                self.dbg.device.avr.protocol.debugwire_disable()
-                self.sendReplyPacket("debugWIRE mode is now disabled")
+                if self.dw_mode_active:
+                    self.dw_mode_active = False
+                    self.dw_deactivated_once = True
+                    self.dbg.disable_debugwire()
+                self.sendReplyPacket("debugWIRE mode is disabled")
+            elif tokens[1] =="":
+                if self.dw_mode_active: self.sendReplyPacket("debugWIRE mode is enabled")
+                else: self.sendReplyPacket("debugWIRE mode is disabled")
         elif "reset".startswith(tokens[0]):
             self.dbg.reset()
             self.sendReplyPacket("MCU has been reset")
@@ -390,13 +431,15 @@ class GdbHandler():
         """
         self.sendPacket('O' + binascii.hexlify(bytearray((mes+"\n").encode('utf-8'))).decode("ascii").upper())
     
+    def sendPowerCycle(self):
+        self.sendDebugMessage("*** Please power-cycle the target system ***")
+
     def supportedHandler(self, packet):
         """
         'qSupported': query for features supported by the gbdserver; in our case packet size and memory map
         """
         self.logger.debug("qSupported query")
         self.sendPacket("PacketSize={0:X};qXfer:memory-map:read+".format(self.packet_size))
-        self.dbg.software_breakpoint_clear_all() # since this starts a GDB debug session
 
     def firstThreadInfoHandler(self, packet):
         """
@@ -435,6 +478,11 @@ class GdbHandler():
         """
         's': single step, perhaps starting a different address
         """
+        if not self.dw_mode_active:
+            self.sendDebugMessage("Enable debugWIRE first: 'monitor debugwire on'")
+            self.sendPacket("E05")
+            self.last_SIGVAL = SIGABRT
+            return
         if packet:
             self.logger.debug("Set PC to 0x%s",packet)
             #set PC - note, byte address converted to word address
@@ -490,13 +538,16 @@ class GdbHandler():
         if self.vflashdone:
             self.vflashdone = False
             self.flash = {} # clear flash (might be a re-load)
-        addrstr, sizestr = packet[1:].split(',')
-        addr = int(addrstr, 16)
-        size = int(sizestr, 16)
-        self.logger.debug("Flash erase: 0x%s, 0x%s", addr, size)
-        self.flash[addr] = [ addr+size, bytearray() ]
-        self.sendPacket("OK")
-        
+        if self.dw_mode_active:
+            addrstr, sizestr = packet[1:].split(',')
+            addr = int(addrstr, 16)
+            size = int(sizestr, 16)
+            self.logger.debug("Flash erase: 0x%X, 0x%X", addr, size)
+            self.flash[addr] = [ addr+size, bytearray() ]
+            self.sendPacket("OK")
+        else:
+            self.sendPacket("E05")
+            
     def flashWriteHandler(self, packet):
         """
         'vFlashWrite': chunks of the program we need to flash
@@ -578,6 +629,11 @@ class GdbHandler():
         'vRun': reset and wait to be started from address 0 
         """
         self.logger.debug("(Re-)start the process and stop")
+        if not self.dw_mode_active:
+            self.sendDebugMessage("Enable debugWIRE first: 'monitor debugwire on'")
+            self.sendPacket("E05")
+            self.last_SIGVAL = SIGABRT
+            return
         self.dbg.reset()
         self.sendPacket(SIGTRAP)
         self.last_SIGVAL = SIGTRAP
@@ -597,12 +653,7 @@ class GdbHandler():
         breakpointType = packet[0]
         addr = packet.split(",")[1]
         self.logger.debug("Remove BP at %s", addr)
-        if breakpointType == "0":
-            #SW breakpoint
-            self.dbg.software_breakpoint_clear(int(addr, 16))
-            self.sendPacket("OK")
-        elif breakpointType == "1":
-            #HW breakpoint
+        if breakpointType == "0" or breakpointType == "1":
             self.dbg.software_breakpoint_clear(int(addr, 16))
             self.sendPacket("OK")
         else:
@@ -618,12 +669,7 @@ class GdbHandler():
         addr = packet.split(",")[1]
         self.logger.debug("Set BP at %s", addr)
         length = packet.split(",")[2]
-        if breakpointType == "0":
-            #SW breakpoint
-            self.dbg.software_breakpoint_set(int(addr, 16))
-            self.sendPacket("OK")
-        elif breakpointType == "1":
-            #HW breakpoint
+        if breakpointType == "0" or breakpointType == "1":
             self.dbg.software_breakpoint_set(int(addr, 16))
             self.sendPacket("OK")
         else:
@@ -634,6 +680,8 @@ class GdbHandler():
         """
         Checks the AvrDebugger for incoming events (breaks)
         """
+        if not self.dw_mode_active: # if DW is not enabled yet, simply return
+            return
         pc = self.dbg.poll_event()
         if pc:
             self.logger.info("BREAK received")
@@ -650,7 +698,7 @@ class GdbHandler():
         if packetData == "":
             message = "$#00"
         self.logger.debug("<- %s", message)
-        self.lastmessage = message
+        self.lastmessage = packetData
         self.socket.sendall(message.encode("ascii"))
 
     def handleData(self, data):
@@ -660,14 +708,17 @@ class GdbHandler():
                 self.lastmessage = None
                 data = data[1:]
             elif data[0] == ord('-'): # NAK, resend last message
+                # remove multiple '-'
+                i = 0
+                while (data[i] == ord('-')):
+                    i += 1
+                data = data[i:]
                 self.logger.debug("-> -")
                 if (self.lastmessage):
-                    self.logger.warning("Resending packet to GDB: %s", self.lastmessage)
+                    self.logger.debug("Resending packet to GDB")
                     self.sendPacket(self.lastmessage)
                 else:
-                    self.logger.error("NAK, but no previous packet")
                     self.sendPacket("")
-                data = data[1:]
             elif data[0] == 3: # CTRL-C
                 self.logger.info("Stop")
                 self.dbg.stop()
@@ -699,11 +750,10 @@ class GdbHandler():
 
     def stopDebugSession(self):
         """
-        Check whether user requested to leave debugWIRE mode by having issued 
-        a 'monitor debugwire off' command. If so, disable debugWIRE mode and 
-        disable DWEN fuse bit. In any case, stop the debugging session
+        Check whether user has already disabled debugWIRE mode. Otherwise, we simply disconnect.
         """
-        self.dbg.stop_debugging()
+        if self.dw_mode_active:
+            self.dbg.stop_debugging()
 
 
 class BreakpointManager(object):
@@ -727,10 +777,11 @@ class BreakpointManager(object):
         pass
 
 class AvrGdbRspServer(object):
-    def __init__(self, avrdebugger, port):
-        self.port = port
-        self.logger = getLogger(__name__)
+    def __init__(self, avrdebugger, devicename, port):
         self.avrdebugger = avrdebugger
+        self.devicename = devicename
+        self.port = port
+        self.logger = getLogger("dw-gdbserver")
         self.connection = None
         self.gdb_socket = None
         self.handler = None
@@ -738,26 +789,25 @@ class AvrGdbRspServer(object):
 
     def serve(self):
         self.gdb_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.logger.info("Starting dw-gdbserver on port %s", self.port)
+        print("Info : Listening on port {} for gdb connection".format(self.port))
         self.gdb_socket.bind(("127.0.0.1", self.port))
         self.gdb_socket.listen()
         self.connection, self.address = self.gdb_socket.accept()
         self.connection.setblocking(0)
         self.logger.info('Connection from %s', self.address)
-        self.handler = GdbHandler(self.connection, self.avrdebugger)
+        self.handler = GdbHandler(self.connection, self.avrdebugger, self.devicename)
         while True:
-            # Should iterate through buffer and take out commands/escape characters
             ready = select.select([self.connection], [], [], 0.5)
             if ready[0]:
                 data = self.connection.recv(4096)
                 if len(data) > 0:
-                    self.logger.debug("-> %s", data)
                     self.handler.handleData(data)
             self.handler.pollEvents()
 
 
     def __del__(self):
-        self.handler.stopDebugSession() # stop debugWIRE if requested by user and disconnect from Debugger
+        if self.handler.dw_mode_active:
+            self.handler.stopDebugSession() # stop debugWIRE if requested by user and disconnect from Debugger
         time.sleep(1) # sleep 1 second before closing in order to allow the client to close first
         if self.connection:
             self.connection.close()
@@ -776,7 +826,6 @@ def main():
     GDBserver for debugWIRE MCUs 
             '''))
 
-    # Device to program
     parser.add_argument("-d", "--device",
                             dest='dev',
                             type=str,
@@ -793,7 +842,7 @@ def main():
     
     # Tool to use
     parser.add_argument("-t", "--tool",
-                            type=str, choices=['atmelice', 'edbg', 'icd4', 'ice4', 'jtagice3', 'medbg', 'nedbg',
+                            type=str, choices=['atmelice', 'edbg', 'jtagice3', 'medbg', 'nedbg',
                                                    'pickit4', 'powerdebugger', 'snap', 'dwlink'],
                             help="tool to connect to")
 
@@ -840,50 +889,33 @@ def main():
 
     try:
         backend.connect_to_tool(toolconnection)
-
-        # Read device name from debugger
-        device = backend.read_kit_device()
-
     except pymcuprog.pymcuprog_errors.PymcuprogToolConnectionError:
         dwlink.main(args)
-        sys.exit(1)
+        return(0)
         
     finally:
         backend.disconnect_from_tool()
 
-    if not device:
-        device = args.dev
-    elif args.dev:
-        if arg.dev != device:
-            print("*** Expected MCU:", args.mcu %s,", attached MCU: %s", device)
-            sys.exit(1)
+    device = args.dev
 
     if not device:
         print("Please specify target MCU with -d option")
-        sys.exit(1)
+        return(1)
             
     transport = hid_transport()
     transport.connect(serial_number=toolconnection.serialnumber, product=toolconnection.tool_name)
 
-    try:
-        # Attach debugger
-        logger.info("Attaching AvrDebugger to device: %s", device)
-        avrdebugger = DWEAvrDebugger(transport)
-        avrdebugger.setup_session(device)
-        avrdebugger.start_debugging()
-        logger.info("Attached")
-    except:
-        print("--- Could not connect to", device, "---")
-        sys.exit(1)
-
     # Start server 
-    logger.info("Starting dw-gdbserver")
-    server = AvrGdbRspServer(avrdebugger, args.port)
+    # logger.info("Starting dw-gdbserver")
+    avrdebugger = DWEAvrDebugger(transport, device)
+    server = AvrGdbRspServer(avrdebugger, device, args.port)
     try:
         server.serve()
         
     except (EndOfSession, SystemExit, KeyboardInterrupt):
         logger.info("End of session")
+        print("--- exit ---\r\n")
+        return(0)
         
 #    except Exception as e:
 #        print("Fatal Error:",e)
