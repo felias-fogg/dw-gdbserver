@@ -1,5 +1,12 @@
 # Changelog
 
+### V0.9.0 (8-Feb-2025)
+
+- basic functionality for using it as a gdbserver is implemented
+- if already in debugWIRE mode, debugging is started right after `target remote`
+- suppressed some spurious error messages from `nvmspi` and `jtagice3protocol` by setting the log level to `CRITICAL` for these modules
+- set `pyedglib` log level to `INFO` when general level is `DEBUG`
+
 ### V0.0.9 (7-Feb-2025)
 
 - `monitor debugwire on` now first tries ISP and will ask for power-cycle

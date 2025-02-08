@@ -17,7 +17,6 @@ from pymcuprog.nvmupdi import NvmAccessProviderCmsisDapUpdi
 from pymcuprog.nvmdebugwire import NvmAccessProviderCmsisDapDebugwire
 from dwe_nvmdebugwire import DWENvmAccessProviderCmsisDapDebugwire
 from pymcuprog.nvmspi import NvmAccessProviderCmsisDapSpi
-from dwe_nvmspi import DWENvmAccessProviderCmsisDapSpi
 from pymcuprog.pymcuprog_errors import PymcuprogToolConfigurationError, PymcuprogNotSupportedError, PymcuprogError
 
 
@@ -70,80 +69,77 @@ class DWEAvrDebugger(AvrDebugger):
             self.device.avr.setup_debug_session(interface=Avr8Protocol.AVR8_PHY_INTF_PDI_1W,
                                                 khz=frequency // 1000,
                                                 use_hv=Avr8Protocol.UPDI_HV_NONE)
-        # For debugWIRE, first try ISP and switch to debugWIRE
-        # Then enable debugWIRE by asking for power-cycle or do it yourself
-        # leaving and re-entering progmode seems necessary for getting things done!
         elif self.device_info['interface'].upper() == "ISP+DW":
-            trydw = False
+            # For debugWIRE, first try ISP and switch to debugWIRE
+            # Then enable debugWIRE by asking for power-cycle or do it yourself
+            # leaving and re-entering progmode seems necessary for getting things done!
             self.spidevice = None
-            try:
-                self.spidevice = DWENvmAccessProviderCmsisDapSpi(self.transport, self.device_info)
-                device_id = self.spidevice.read_device_id()
-            except Exception as e:
-                self.logger.debug(e)
-                self.logger.debug("ISP access not possible, will try debugWIRE")
-                trydw = True
-            if not trydw:
-                print("%X %X" % (self.device_info['device_id'], int.from_bytes(device_id,byteorder='little')))
-               # if self.device_info['device_id'] != int.from_bytes(device_id,byteorder='little'):
-               #     raise FatalErrorException("Wrong MCU signature: 0x{:X}, expected: 0x{:X}".format(
-               #               int.from_bytes(device_id,byteorder='little'),
-               #               self.device_info['device_id']))
-                fuses = self.spidevice.read(self.memory_info.memory_info_by_name('fuses'), 0, 3)
-                self.logger.debug("Fuses read: %X %X %X",fuses[0], fuses[1], fuses[2])
-                lockbits = self.spidevice.read(self.memory_info.memory_info_by_name('lockbits'), 0, 1)
-                self.logger.debug("Lockbits read: %X", lockbits[0])
-                if (lockbits[0] != 0xFF):
-                    self.logger.debug("MCU is locked. Will be erased.")
-                    self.spidevice.erase()
+            if not 'skip_isp' in options:
+                trydw = False
+                try:
+                    self.spidevice = NvmAccessProviderCmsisDapSpi(self.transport, self.device_info)
+                    device_id = self.spidevice.read_device_id()
+                except Exception as e:
+                    self.logger.debug(e)
+                    self.logger.debug("ISP access not possible, will try debugWIRE")
+                    trydw = True
+                if not trydw:
+                    if self.device_info['device_id'] != int.from_bytes(device_id,byteorder='little'):
+                        raise FatalErrorException("Wrong MCU signature: 0x{:X}, expected: 0x{:X}".format(
+                            int.from_bytes(device_id,byteorder='little'),
+                            self.device_info['device_id']))
+                    fuses = self.spidevice.read(self.memory_info.memory_info_by_name('fuses'), 0, 3)
+                    self.logger.debug("Fuses read: %X %X %X",fuses[0], fuses[1], fuses[2])
                     lockbits = self.spidevice.read(self.memory_info.memory_info_by_name('lockbits'), 0, 1)
-                    self.logger.debug("Lockbits after erase: %X", lockbits[0])
-                    if 'bootrst_fuse' in self.device_info:
-                        self.logger.debug("BOOTRST fuse will be unprogrammed.")
-                        # unprogramm bit 0 in high or extended fuse
-                        self.spidevice.stop()
-                        self.spidevice.isp.enter_progmode()
-                        self.spidevice.write(self.memory_info.memory_info_by_name('fuses'),
-                                                 self.device_info['bootrst_fuse'],
-                                                 bytearray([fuses[self.device_info['bootrst_fuse']] | 0x01]) )
-                # program the DWEN bit
-                self.spidevice.stop()
-                self.spidevice.isp.enter_progmode()
-                fuses = self.spidevice.read(self.memory_info.memory_info_by_name('fuses'), 0, 3)
-                self.logger.debug("Fuses read again: %X %X %X",fuses[0], fuses[1], fuses[2])
-                fuses[1] &= (0xFF & ~(self.device_info['dwen_fusebit']))
-                self.logger.debug("New high fuse: 0x%X", fuses[1])
-                self.spidevice.write(self.memory_info.memory_info_by_name('fuses'), 1,
-                                         fuses[1:2])
-                self.spidevice.stop()
-                self.spidevice.isp.enter_progmode()
-                fuses = self.spidevice.read(self.memory_info.memory_info_by_name('fuses'), 0, 3)
-                self.logger.debug("Fuses after writing (single read): %X %X %X",fuses[0], fuses[1], fuses[2])
-                # stop ISP session
-                self.spidevice.stop()
-                # ask user for power-cycle and wait for voltage to come up again
-                wait_start = time.monotonic()
-                last_message = 0
-                if 'callback' in options:
-                    options['callback']()
-                power_cycle = False
-                while time.monotonic() - wait_start < 150:
-                    if (time.monotonic() - last_message > 20):
-                        print("*** Please power-cycle the target system ***")
-                        last_message = time.monotonic()
-                    if read_target_voltage(self.housekeeper) < 0.5:
-                        wait_start = time.monotonic()
-                        self.logger.debug("Power-cycle recognized")
-                        while  read_target_voltage(self.housekeeper) < 1.5 and \
-                            time.monotonic() - wait_start < 20:
-                            time.sleep(0.1)
-                        if read_target_voltage(self.housekeeper) < 1.5:
-                            raise FatalErrorException("Timed out waiting for repowering target")
-                        time.sleep(0.5) # wait for target power to settle
-                        power_cycle = True
-                        break
-                if not power_cycle:
-                    raise FatalErrorException("Timed out waiting for power-cycle")
+                    self.logger.debug("Lockbits read: %X", lockbits[0])
+                    if (lockbits[0] != 0xFF):
+                        self.logger.debug("MCU is locked. Will be erased.")
+                        self.spidevice.erase()
+                        lockbits = self.spidevice.read(self.memory_info.memory_info_by_name('lockbits'), 0, 1)
+                        self.logger.debug("Lockbits after erase: %X", lockbits[0])
+                        if 'bootrst_fuse' in self.device_info:
+                            # unprogramm bit 0 in high or extended fuse
+                            self.logger.debug("BOOTRST fuse will be unprogrammed.")
+                            # leave and re-enter programming mode
+                            self.spidevice.stop()
+                            self.spidevice.isp.enter_progmode()
+                            self.spidevice.write(self.memory_info.memory_info_by_name('fuses'),
+                                                    self.device_info['bootrst_fuse'],
+                                                    bytearray([fuses[self.device_info['bootrst_fuse']] | 0x01]) )
+                    # program the DWEN bit
+                    # again, leaving and re-entering programming mode seems to be safe 
+                    self.spidevice.stop()
+                    self.spidevice.isp.enter_progmode()
+                    fuses = self.spidevice.read(self.memory_info.memory_info_by_name('fuses'), 0, 3)
+                    self.logger.debug("Fuses read again: %X %X %X",fuses[0], fuses[1], fuses[2])
+                    fuses[1] &= (0xFF & ~(self.device_info['dwen_fusebit']))
+                    self.logger.debug("New high fuse: 0x%X", fuses[1])
+                    self.spidevice.write(self.memory_info.memory_info_by_name('fuses'), 1,
+                                            fuses[1:2])
+                    self.spidevice.stop()
+                    # ask user for power-cycle and wait for voltage to come up again
+                    wait_start = time.monotonic()
+                    last_message = 0
+                    if 'callback' in options:
+                        options['callback']()
+                    power_cycle = False
+                    while time.monotonic() - wait_start < 150:
+                        if (time.monotonic() - last_message > 20):
+                            print("*** Please power-cycle the target system ***")
+                            last_message = time.monotonic()
+                        if read_target_voltage(self.housekeeper) < 0.5:
+                            wait_start = time.monotonic()
+                            self.logger.debug("Power-cycle recognized")
+                            while  read_target_voltage(self.housekeeper) < 1.5 and \
+                              time.monotonic() - wait_start < 20:
+                                time.sleep(0.1)
+                            if read_target_voltage(self.housekeeper) < 1.5:
+                                raise FatalErrorException("Timed out waiting for repowering target")
+                            time.sleep(0.6) # wait for debugWIRE system to be ready to accept connections 
+                            power_cycle = True
+                            break
+                    if not power_cycle:
+                        raise FatalErrorException("Timed out waiting for power-cycle")
             # now we can hopyfully activate debugWIRE
             self.device = DWENvmAccessProviderCmsisDapDebugwire(self.transport, self.device_info)
             self.device.avr.setup_debug_session()
@@ -250,7 +246,7 @@ class DWEAvrDebugger(AvrDebugger):
         self.device.avr.protocol.debugwire_disable()
         # now open an ISP programming session again
         if not self.spidevice:
-            self.spidevice = DWENvmAccessProviderCmsisDapSpi(self.transport, self.device_info)
+            self.spidevice = NvmAccessProviderCmsisDapSpi(self.transport, self.device_info)
         self.spidevice.isp.enter_progmode()
         fuses = self.spidevice.read(self.memory_info.memory_info_by_name('fuses'), 0, 3)
         self.logger.debug("Fuses read: %X %X %X",fuses[0], fuses[1], fuses[2])

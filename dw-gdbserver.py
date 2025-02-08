@@ -1,19 +1,14 @@
 """
 debugWIRE GDBServer 
 """
-VERSION="0.0.9"
+VERSION="0.9.0"
 
-SIGHUP  = "S01"     # connection to target lost
 SIGINT  = "S02"     # Interrupt  - user interrupted the program (UART ISR) 
 SIGILL  = "S04"     # Illegal instruction
 SIGTRAP = "S05"     # Trace trap  - stopped on a breakpoint
-SIGABRT = "S06"     # Abort because of some fatal error
 
 import site
 
-site.addsitedir("../pyedbglib")
-site.addsitedir("../pymcuprog")
-#site.addsitedir("../../Library/Python/3.13/lib/python/site-packages")
 
 # args, logging
 import time
@@ -54,7 +49,7 @@ class GdbHandler():
     Maps between incoming GDB requests and AVR debugging protocols (via pymcuprog)
     """
     def __init__ (self, socket, avrdebugger, devicename, powercycle=True):
-        self.logger = getLogger(__name__)
+        self.logger = getLogger('GdbHandler')
         self.socket = socket
         self.dbg = avrdebugger
         self.devicename = devicename
@@ -384,7 +379,7 @@ class GdbHandler():
             if tokens[1][0:2] == "on":
                 if self.dw_deactivated_once:
                     self.sendDebugMessage("Cannot reactivate debugWIRE")
-                    self.sendReplyPacket("You have to restart the debugger")
+                    self.sendReplyPacket("You have to exit and restart the debugger")
                 else:
                     if not self.dw_mode_active:
                         # Attach debugger
@@ -395,6 +390,7 @@ class GdbHandler():
                             opt = ""
                         self.dbg.setup_session(self.devicename, options=opt)
                         self.dbg.start_debugging()
+                        self.dbg.reset()
                         self.logger.debug("Attached")
                         self.dw_mode_active = True
                     self.sendReplyPacket("debugWIRE mode is enabled")
@@ -411,11 +407,11 @@ class GdbHandler():
             self.dbg.reset()
             self.sendReplyPacket("MCU has been reset")
         elif "timer".startswith(tokens[0]):
-            self.sendReplyPacket("timer NYI")
+            self.sendReplyPacket("Currently, timers are always frozen when execution is stopped")
         elif "breakpoints".startswith(tokens[0]):
-            self.sendReplyPacket("breakpoints NYI")
+            self.sendReplyPacket("Currently, only software breakpoints are used")
         elif "singlestep".startswith(tokens[0]):
-            self.sendReplyPacket("singlestep NYI")
+            self.sendReplyPacket("Currently, single-stepping is always interruptible")
         else:
             self.sendReplyPacket("Unknown monitor command")
 
@@ -437,8 +433,25 @@ class GdbHandler():
     def supportedHandler(self, packet):
         """
         'qSupported': query for features supported by the gbdserver; in our case packet size and memory map
+        Because this is also the command send after a connection with 'target remote' is made,
+        we will try to establish a connection to the debugWIRE target.
         """
         self.logger.debug("qSupported query")
+
+        # Try to start a debugWIRE debugging session
+        # if we are already in debugWIRE mode, this will work
+        # if not, one has to use the 'monitor debugwire on' command later on
+        try:
+            self.dbg.setup_session(self.devicename, options={'skip_isp': True})
+            self.dbg.start_debugging()
+            self.dbg.reset()
+            self.dw_mode_active = True
+        except FatalErrorException:
+            raise
+        except Exception:
+            # we will try to connect later
+            pass
+        
         self.sendPacket("PacketSize={0:X};qXfer:memory-map:read+".format(self.packet_size))
 
     def firstThreadInfoHandler(self, packet):
@@ -728,6 +741,7 @@ class GdbHandler():
                 data = data[1:]
             elif data[0] == ord('$'): # start of message
                 validData = True
+                self.logger.debug('-> %s', data)
                 checksum = (data.split(b"#")[1])[:2]
                 packet_data = (data.split(b"$")[1]).split(b"#")[0]
                 if int(checksum, 16) != sum(packet_data) % 256:
@@ -756,32 +770,12 @@ class GdbHandler():
             self.dbg.stop_debugging()
 
 
-class BreakpointManager(object):
-    def __init__(self, handler, hwps):
-        self.handler = handler
-        self.hwps = hwps
-
-    def cleanup(self):
-        pass
-
-    def newbp(self, addr):
-        pass
-
-    def removebp(self, addr):
-        pass
-
-    def resume(self, addr):
-        pass
-
-    def step(self, addr):
-        pass
-
 class AvrGdbRspServer(object):
     def __init__(self, avrdebugger, devicename, port):
         self.avrdebugger = avrdebugger
         self.devicename = devicename
         self.port = port
-        self.logger = getLogger("dw-gdbserver")
+        self.logger = getLogger("AvrGdbRspServer")
         self.connection = None
         self.gdb_socket = None
         self.handler = None
@@ -789,7 +783,7 @@ class AvrGdbRspServer(object):
 
     def serve(self):
         self.gdb_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        print("Info : Listening on port {} for gdb connection".format(self.port))
+        print("Info : Listening on port {} for gdb connection".format(self.port)) # this is for cortex-debug!
         self.gdb_socket.bind(("127.0.0.1", self.port))
         self.gdb_socket.listen()
         self.connection, self.address = self.gdb_socket.accept()
@@ -801,13 +795,14 @@ class AvrGdbRspServer(object):
             if ready[0]:
                 data = self.connection.recv(4096)
                 if len(data) > 0:
+#                    self.logger.debug("Received over TCP/IP: %s",data)
                     self.handler.handleData(data)
             self.handler.pollEvents()
 
 
     def __del__(self):
-        if self.handler.dw_mode_active:
-            self.handler.stopDebugSession() # stop debugWIRE if requested by user and disconnect from Debugger
+        if self.handler and self.handler.dw_mode_active:
+            self.handler.stopDebugSession() # stop debugWIRE 
         time.sleep(1) # sleep 1 second before closing in order to allow the client to close first
         if self.connection:
             self.connection.close()
@@ -863,9 +858,14 @@ def main():
     args = parser.parse_args()
 
     # Setup logging
-    logging.basicConfig(stream=sys.stderr,level=args.verbose.upper())
-
+    logging.basicConfig(stream=sys.stderr,level=args.verbose.upper(), format ='%(name)s - %(levelname)s - %(message)s')
     logger = getLogger()
+    getLogger('pyedbglib.protocols').setLevel(logging.CRITICAL) # supress spurious error messages from pyedbglib
+    getLogger('pymcuprog.nvm').setLevel(logging.CRITICAL) # suppress errors of not connecting: It is intended!
+    if args.verbose.upper() == "DEBUG":
+        getLogger('pyedbglib').setLevel(logging.INFO)
+
+    
     if args.version:
         print("dw-gdbserver version {}".format(VERSION))
         return 0
