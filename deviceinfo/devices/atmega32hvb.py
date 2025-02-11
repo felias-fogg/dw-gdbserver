@@ -2,7 +2,7 @@
 from pymcuprog.deviceinfo.eraseflags import ChiperaseEffect
 
 DEVICE_INFO = {
-    'name': 'atmega328p',
+    'name': 'atmega32hvb',
     'architecture': 'avr8',
 
     # eeprom
@@ -25,7 +25,7 @@ DEVICE_INFO = {
 
     # fuses
     'fuses_address_byte': 0,
-    'fuses_size_bytes': 0x0003,
+    'fuses_size_bytes': 0x0002,
     'fuses_page_size_bytes': 0x01,
     'fuses_read_size_bytes': 0x01,
     'fuses_write_size_bytes': 0x01,
@@ -69,8 +69,8 @@ DEVICE_INFO = {
     'eedr_base' : 0x20,
     'spmcsr_base' : 0x57,
     'osccal_base' : 0x66,
-    'dwen_mask' : 0x40,
+    'dwen_mask' : 0x08,
     'bootrst_fuse' : 0x01,
-    'device_id': 0x1E950F,
+    'device_id': 0x1E9510,
     'interface': 'ISP+HVPP+debugWIRE'
 }

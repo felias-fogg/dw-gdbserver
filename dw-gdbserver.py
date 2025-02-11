@@ -391,6 +391,10 @@ class GdbHandler():
                         self.dbg.setup_session(self.devicename, options=opt)
                         self.dbg.start_debugging()
                         self.dbg.reset()
+                        # Now read out program counter and check whether it contains stuck to 1 bits
+                        pc = self.dbg.program_counter_read()
+                        if pc != 0:
+                            raise FatalErrorException("Program counter of MCU has stuck-at-1-bits")
                         self.logger.debug("Attached")
                         self.dw_mode_active = True
                     self.sendReplyPacket("debugWIRE mode is enabled")
@@ -451,7 +455,15 @@ class GdbHandler():
         except Exception:
             # we will try to connect later
             pass
-        
+
+        if self.dw_mode_active:
+            # Now read out program counter and check whether it contains stuck to 1 bits
+            pc = self.dbg.program_counter_read()
+            self.logger.debug("PC=%X",pc)
+            if pc != 0:
+                raise FatalErrorException("Program counter of MCU has stuck-at-1-bits")
+
+        self.logger.debug("dw_mode_active=%d",self.dw_mode_active)            
         self.sendPacket("PacketSize={0:X};qXfer:memory-map:read+".format(self.packet_size))
 
     def firstThreadInfoHandler(self, packet):
@@ -861,7 +873,7 @@ def main():
     logging.basicConfig(stream=sys.stderr,level=args.verbose.upper(), format ='%(name)s - %(levelname)s - %(message)s')
     logger = getLogger()
     getLogger('pyedbglib.protocols').setLevel(logging.CRITICAL) # supress spurious error messages from pyedbglib
-    getLogger('pymcuprog.nvm').setLevel(logging.CRITICAL) # suppress errors of not connecting: It is intended!
+    #getLogger('pymcuprog.nvm').setLevel(logging.CRITICAL) # suppress errors of not connecting: It is intended!
     if args.verbose.upper() == "DEBUG":
         getLogger('pyedbglib').setLevel(logging.INFO)
 

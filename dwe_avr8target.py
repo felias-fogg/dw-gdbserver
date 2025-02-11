@@ -155,11 +155,14 @@ class DWETinyAvrTarget(TinyAvrTarget):
         ee_size = eeprom_info[DeviceMemoryInfoKeys.SIZE]
         ocd_addr = device_info.get(DeviceInfoKeysAvr.OCD_BASE)
         ocd_rev = device_info.get('ocd_rev')
-        eearh_addr = device_info.get('eearh_base')
-        eearl_addr = device_info.get('eearl_base')
+        eear_size = device_info.get('eear_size')
+        eearh_addr = 0
+        if (eear_size > 1):
+            eearh_addr = device_info.get('eear_base')
+        eearl_addr = device_info.get('eear_base')
         eecr_addr = device_info.get('eecr_base')
         eedr_addr = device_info.get('eedr_base')
-        spmcr_addr = device_info.get('spmcr_base')
+        spmcsr_addr = device_info.get('spmcsr_base')
         osccal_addr = device_info.get('osccal_base')
         device_id = device_info.get(DeviceInfoKeys.DEVICE_ID)
 
@@ -196,11 +199,12 @@ class DWETinyAvrTarget(TinyAvrTarget):
         devdata += bytearray([eecr_addr & 0xFF])
         # TINY_EEDR_BASE (1@0x1C)
         devdata += bytearray([eedr_addr & 0xFF])
-        # TINY_SPMCR_BASE (1@0x1D)
-        devdata += bytearray([spmcr_addr & 0xFF])
+        # TINY_SPMCSR_BASE (1@0x1D)
+        devdata += bytearray([spmcsr_addr & 0xFF])
         # TINY_OSCCAL_BASE (1@0x1E)
         devdata += bytearray([osccal_addr & 0xFF])
-        
+
+        self.logger.debug("Write all device data")
         self.protocol.write_device_data(devdata)
 
 

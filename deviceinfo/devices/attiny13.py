@@ -2,12 +2,12 @@
 from pymcuprog.deviceinfo.eraseflags import ChiperaseEffect
 
 DEVICE_INFO = {
-    'name': 'atmega328p',
+    'name': 'attiny13',
     'architecture': 'avr8',
 
     # eeprom
     'eeprom_address_byte': 0x0000,
-    'eeprom_size_bytes': 0x0400,
+    'eeprom_size_bytes': 0x0040,
     'eeprom_page_size_bytes': 0x04,
     'eeprom_read_size_bytes': 0x01,
     'eeprom_write_size_bytes': 0x01,
@@ -16,16 +16,16 @@ DEVICE_INFO = {
 
     # flash
     'flash_address_byte': 0x0000,
-    'flash_size_bytes': 0x8000,
-    'flash_page_size_bytes': 0x80,
+    'flash_size_bytes': 0x0400,
+    'flash_page_size_bytes': 0x20,
     'flash_read_size_bytes': 0x02,
-    'flash_write_size_bytes': 0x80,
+    'flash_write_size_bytes': 0x20,
     'flash_chiperase_effect': ChiperaseEffect.ALWAYS_ERASED,
     'flash_isolated_erase': False,
 
     # fuses
     'fuses_address_byte': 0,
-    'fuses_size_bytes': 0x0003,
+    'fuses_size_bytes': 0x0002,
     'fuses_page_size_bytes': 0x01,
     'fuses_read_size_bytes': 0x01,
     'fuses_write_size_bytes': 0x01,
@@ -33,8 +33,8 @@ DEVICE_INFO = {
     'fuses_isolated_erase': False,
 
     # internal_sram
-    'internal_sram_address_byte': 0x0100,
-    'internal_sram_size_bytes': 0x0800,
+    'internal_sram_address_byte': 0x0060,
+    'internal_sram_size_bytes': 0x0040,
     'internal_sram_page_size_bytes': 0x01,
     'internal_sram_read_size_bytes': 0x01,
     'internal_sram_write_size_bytes': 0x01,
@@ -61,16 +61,15 @@ DEVICE_INFO = {
 
     # Some extra AVR specific fields
     'address_size': '16-bit',
-    'ocd_rev' : 1,
-    'ocd_base' : 0x31,
-    'eear_base' : 0x21,
-    'eear_size' : 2,
-    'eecr_base' : 0x1F,
-    'eedr_base' : 0x20,
+    'ocd_rev' : 0,
+    'ocd_base' : 0x2e,
+    'eear_base' : 0x1E,
+    'eear_size' : 1,
+    'eecr_base' : 0x1C,
+    'eedr_base' : 0x1D,
     'spmcsr_base' : 0x57,
-    'osccal_base' : 0x66,
-    'dwen_mask' : 0x40,
-    'bootrst_fuse' : 0x01,
-    'device_id': 0x1E950F,
-    'interface': 'ISP+HVPP+debugWIRE'
+    'osccal_base' : 0x51,
+    'dwen_mask' : 0x08,
+    'device_id': 0x1E9007,
+    'interface': 'ISP+HVSP+debugWIRE'
 }

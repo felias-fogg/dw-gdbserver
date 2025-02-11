@@ -2,7 +2,7 @@
 from pymcuprog.deviceinfo.eraseflags import ChiperaseEffect
 
 DEVICE_INFO = {
-    'name': 'atmega328p',
+    'name': 'atmega64hve2',
     'architecture': 'avr8',
 
     # eeprom
@@ -16,7 +16,7 @@ DEVICE_INFO = {
 
     # flash
     'flash_address_byte': 0x0000,
-    'flash_size_bytes': 0x8000,
+    'flash_size_bytes': 0x10000,
     'flash_page_size_bytes': 0x80,
     'flash_read_size_bytes': 0x02,
     'flash_write_size_bytes': 0x80,
@@ -25,7 +25,7 @@ DEVICE_INFO = {
 
     # fuses
     'fuses_address_byte': 0,
-    'fuses_size_bytes': 0x0003,
+    'fuses_size_bytes': 0x0002,
     'fuses_page_size_bytes': 0x01,
     'fuses_read_size_bytes': 0x01,
     'fuses_write_size_bytes': 0x01,
@@ -34,7 +34,7 @@ DEVICE_INFO = {
 
     # internal_sram
     'internal_sram_address_byte': 0x0100,
-    'internal_sram_size_bytes': 0x0800,
+    'internal_sram_size_bytes': 0x1000,
     'internal_sram_page_size_bytes': 0x01,
     'internal_sram_read_size_bytes': 0x01,
     'internal_sram_write_size_bytes': 0x01,
@@ -69,8 +69,8 @@ DEVICE_INFO = {
     'eedr_base' : 0x20,
     'spmcsr_base' : 0x57,
     'osccal_base' : 0x66,
-    'dwen_mask' : 0x40,
+    'dwen_mask' : 0x08,
     'bootrst_fuse' : 0x01,
-    'device_id': 0x1E950F,
-    'interface': 'ISP+HVPP+debugWIRE'
+    'device_id': 0x1E9610,
+    'interface': 'ISP+HVSP+debugWIRE'
 }
