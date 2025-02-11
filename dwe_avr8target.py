@@ -156,9 +156,7 @@ class DWETinyAvrTarget(TinyAvrTarget):
         ocd_addr = device_info.get(DeviceInfoKeysAvr.OCD_BASE)
         ocd_rev = device_info.get('ocd_rev')
         eear_size = device_info.get('eear_size')
-        eearh_addr = 0
-        if (eear_size > 1):
-            eearh_addr = device_info.get('eear_base')
+        eearh_addr = device_info.get('eear_base') + 1 # this seems to be genrally OK
         eearl_addr = device_info.get('eear_base')
         eecr_addr = device_info.get('eecr_base')
         eedr_addr = device_info.get('eedr_base')

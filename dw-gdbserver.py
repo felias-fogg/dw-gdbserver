@@ -390,10 +390,12 @@ class GdbHandler():
                             opt = ""
                         self.dbg.setup_session(self.devicename, options=opt)
                         self.dbg.start_debugging()
-                        self.dbg.reset()
+                        #time.sleep(1)
+                        #self.dbg.reset()
                         # Now read out program counter and check whether it contains stuck to 1 bits
                         pc = self.dbg.program_counter_read()
-                        if pc != 0:
+                        self.logger.debug("PC=%X",pc)
+                        if (pc << 1) > self.dbg.device_info['flash_size_bytes']:
                             raise FatalErrorException("Program counter of MCU has stuck-at-1-bits")
                         self.logger.debug("Attached")
                         self.dw_mode_active = True
@@ -448,7 +450,12 @@ class GdbHandler():
         try:
             self.dbg.setup_session(self.devicename, options={'skip_isp': True})
             self.dbg.start_debugging()
+            time.sleep(1)
+            pc = self.dbg.program_counter_read()
+            self.logger.debug("PC=%X",pc)
             self.dbg.reset()
+            pc = self.dbg.program_counter_read()
+            self.logger.debug("PC=%X",pc)
             self.dw_mode_active = True
         except FatalErrorException:
             raise
@@ -735,7 +742,7 @@ class GdbHandler():
             elif data[0] == ord('-'): # NAK, resend last message
                 # remove multiple '-'
                 i = 0
-                while (data[i] == ord('-')):
+                while (i < len(data) and data[i] == ord('-')):
                     i += 1
                 data = data[i:]
                 self.logger.debug("-> -")

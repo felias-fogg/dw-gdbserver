@@ -151,7 +151,7 @@ class DWEAvrDebugger(AvrDebugger):
                                 time.sleep(0.1)
                             if read_target_voltage(self.housekeeper) < 1.5:
                                 raise FatalErrorException("Timed out waiting for repowering target")
-                            time.sleep(0.6) # wait for debugWIRE system to be ready to accept connections 
+                            time.sleep(1) # wait for debugWIRE system to be ready to accept connections 
                             power_cycle = True
                             break
                     if not power_cycle:
@@ -162,8 +162,10 @@ class DWEAvrDebugger(AvrDebugger):
             idbytes = self.device.read_device_id()
             sig = (0x1E<<16) + (idbytes[1]<<8) + idbytes[0]
             if sig != self.device_info['device_id']:
-                raise FatalErrorException("Wrong MCU signature: 0x{:X}, expected: 0x{:X}".format(
-                              sig, self.device_info['device_id']))
+                # Some funny special cases of chips pretending to be someone else when in debugWIRE mode
+                if sig == 0x1E930F and self.device_info['device_id'] == 0x1E930A: return # pretends to be a 88P, but is 88
+                if sig == 0x1E940B and self.device_info['device_id'] == 0x1E9406: return # pretends to be a 168P, but is 168
+                if sig == 0x1E950F and self.device_info['device_id'] == 0x1E9514: return # pretends to be a 328P, but is 328                   raise FatalErrorException("Wrong MCU signature: 0x{:X}, expected: 0x{:X}".format(sig, self.device_info['device_id']))
             
     def start_debugging(self, flash_data=None):
         """
@@ -271,4 +273,5 @@ class DWEAvrDebugger(AvrDebugger):
         self.spidevice.write(self.memory_info.memory_info_by_name('fuses'), 1,
                                          fuses[1:2])
         self.spidevice.stop()
-                
+               
+ 

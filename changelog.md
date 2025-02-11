@@ -1,5 +1,18 @@
 # Changelog 
 
+### V0.9.2 (11-Feb-2025)
+
+- Apparently, one should not request a reset after connecting. REmoving that helped a lot. 
+- MCUs with Stuck-at-1-bits are identified.
+- Added code to honor the fact that the ATmega88/168/328 pretend to be P-versions when in debugWIRE mode
+- Set the EEARH field in the activation record to EEARl+1. This seems to be the right choice when following the datasheet for the ATmega48. And it led to success in starting thr MCU.
+
+### V0.9.1 (11-Feb-2025)
+
+- Works now with ATmega328P
+- harvested all debugWIRE MCUs with the new scrip‚t dw-harvest.py
+- does not work with ATmega48, and probably not with others ...
+
 ### V0.9.0 (8-Feb-2025)
 
 - basic functionality for using it as a gdbserver is implemented
