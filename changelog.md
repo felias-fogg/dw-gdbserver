@@ -1,6 +1,6 @@
 # Changelog
 
-### V0.9.6 (13-Feb-2025)
+### V0.9.8 (14-Feb-2025)
 
 - Changed: All debugWIRE relevant start/finish methods have been moved to dw-gdbserver. The code has been placed into a new class DebugWIRE.  
 
