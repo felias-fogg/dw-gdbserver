@@ -1,7 +1,7 @@
 """
 debugWIRE GDBServer 
 """
-VERSION="0.9.3"
+VERSION="0.9.6"
 
 SIGHUO  = "S01"     # no connection
 SIGINT  = "S02"     # Interrupt  - user interrupted the program (UART ISR) 
@@ -377,6 +377,7 @@ class GdbHandler():
             self.sendDebugMessage("monitor version             - print version")
             self.sendDebugMessage("monitor debugwire [on|off]  - activate/deactivate debugWIRE mode")
             self.sendDebugMessage("monitor reset               - reset MCU")
+            self.sendDebugMessage("monitor noload              - execute even when no code has been loaded")
             self.sendDebugMessage("monitor timer [freeze|run]  - freeze/run timers when stopped")
             self.sendDebugMessage("monitor breakpoints [all|software|hardware]")
             self.sendDebugMessage("                            - allow bps of a certain kind only")
@@ -416,6 +417,8 @@ class GdbHandler():
             self.sendReplyPacket("Currently, only software breakpoints are used")
         elif "singlestep".startswith(tokens[0]):
             self.sendReplyPacket("Currently, single-stepping is always interruptible")
+        elif "noload".startswith(tokens[0]):
+            self.sendReplyPacket("Currently, it is not checked whether the program has been loaded")
         else:
             self.sendReplyPacket("Unknown monitor command")
 
