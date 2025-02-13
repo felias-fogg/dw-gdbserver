@@ -202,7 +202,7 @@ class DWETinyAvrTarget(TinyAvrTarget):
         # TINY_OSCCAL_BASE (1@0x1E)
         devdata += bytearray([osccal_addr & 0xFF])
 
-        self.logger.debug("Write all device data")
+        self.logger.debug("Write all device data: %s", devdata)
         self.protocol.write_device_data(devdata)
 
 

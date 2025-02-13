@@ -3,9 +3,11 @@ debugWIRE GDBServer
 """
 VERSION="0.9.3"
 
+SIGHUO  = "S01"     # no connection
 SIGINT  = "S02"     # Interrupt  - user interrupted the program (UART ISR) 
 SIGILL  = "S04"     # Illegal instruction
 SIGTRAP = "S05"     # Trace trap  - stopped on a breakpoint
+SIGABRT = "S06"     # Abort because of a fatal error
 
 import site
 
@@ -29,7 +31,7 @@ import usb
 from pyedbglib.hidtransport.hidtransportfactory import hid_transport
 import pymcuprog
 from pymcuprog.avrdebugger import AvrDebugger
-from dwe_avrdebugger import DWEAvrDebugger, FatalErrorException
+from dwe_avrdebugger import DWEAvrDebugger, FatalError
 from pymcuprog.backend import Backend
 from pymcuprog.pymcuprog_main import _setup_tool_connection
 from pymcuprog.nvmspi import NvmAccessProviderCmsisDapSpi
@@ -382,6 +384,8 @@ class GdbHandler():
                     self.sendReplyPacket("You have to exit and restart the debugger")
                 else:
                     if not self.dw_mode_active:
+                        self.dw_mode_active = self.coldStart(graceful=False, callback= self.sendPowerCycle)
+                        return
                         # Attach debugger
                         self.logger.debug("Attaching AvrDebugger to device: %s", self.devicename)
                         if self.powercycle:
@@ -396,7 +400,7 @@ class GdbHandler():
                         pc = self.dbg.program_counter_read()
                         self.logger.debug("PC=%X",pc)
                         if (pc << 1) > self.dbg.device_info['flash_size_bytes']:
-                            raise FatalErrorException("Program counter of MCU has stuck-at-1-bits")
+                            raise FatalError("Program counter of MCU has stuck-at-1-bits")
                         self.logger.debug("Attached")
                         self.dw_mode_active = True
                     self.sendReplyPacket("debugWIRE mode is enabled")
@@ -447,29 +451,7 @@ class GdbHandler():
         # Try to start a debugWIRE debugging session
         # if we are already in debugWIRE mode, this will work
         # if not, one has to use the 'monitor debugwire on' command later on
-        try:
-            self.dbg.setup_session(self.devicename, options={'skip_isp': True})
-            self.dbg.start_debugging()
-            time.sleep(1)
-            pc = self.dbg.program_counter_read()
-            self.logger.debug("PC=%X",pc)
-            self.dbg.reset()
-            pc = self.dbg.program_counter_read()
-            self.logger.debug("PC=%X",pc)
-            self.dw_mode_active = True
-        except FatalErrorException:
-            raise
-        except Exception:
-            # we will try to connect later
-            pass
-
-        if self.dw_mode_active:
-            # Now read out program counter and check whether it contains stuck to 1 bits
-            pc = self.dbg.program_counter_read()
-            self.logger.debug("PC=%X",pc)
-            if pc != 0:
-                raise FatalErrorException("Program counter of MCU has stuck-at-1-bits")
-
+        self.dw_mode_active = self.warmStart(graceful=True)
         self.logger.debug("dw_mode_active=%d",self.dw_mode_active)            
         self.sendPacket("PacketSize={0:X};qXfer:memory-map:read+".format(self.packet_size))
 
@@ -708,6 +690,62 @@ class GdbHandler():
             #Not Supported
             self.sendPacket("")
 
+    def warmStart(self, graceful=True):
+        """
+        Try to establish a connection to the debugWIRE OCD. If not possible (because we are still in ISP mode) and
+        graceful=True, the function returns false, otherwise true. If not graceful, an exception is thrown if we are
+        unsuccessul in establishing the connection.
+        """
+        try:
+            self.dbg.setup_session(self.devicename, options={'skip_isp': True})
+            idbytes = self.dbg.device.read_device_id()
+            sig = (0x1E<<16) + (idbytes[1]<<8) + idbytes[0]
+            self.logger.debug("Device signature by debugWIRE: %X", sig)
+            self.dbg.start_debugging()
+            self.dbg.reset()
+        except FatalError:
+            raise
+        except Exception as e:
+            self.logger.debug("Graceful exception: %s",e)
+            if graceful:
+                return False  # we will try to connect later
+            else:
+                raise
+        # Now read out program counter and check whether it contains stuck to 1 bits
+        pc = self.dbg.program_counter_read()
+        self.logger.debug("PC=%X",pc)
+        if pc != 0:
+            raise FatalError("Program counter of MCU has stuck-at-1-bits")
+        # Check device signature
+        if sig != self.dbg.device_info['device_id']:
+            # Some funny special cases of chips pretending to be someone else when in debugWIRE mode
+            if sig == 0x1E930F and self.dbg.device_info['device_id'] == 0x1E930A: return # pretends to be a 88P, but is 88
+            if sig == 0x1E940B and self.dbg.device_info['device_id'] == 0x1E9406: return # pretends to be a 168P, but is 168
+            if sig == 0x1E950F and self.dbg.device_info['device_id'] == 0x1E9514: return # pretends to be a 328P, but is 328
+            raise FatalError("Wrong MCU signature: 0x{:X}, expected: 0x{:X}".format(sig, self.dbg.device_info['device_id']))
+        return True
+
+    def coldStart(self, graceful=False, callback=None, allow_erase=True):
+        """
+        On the assumption that we are in ISP mode, first DWEN is programmed, then a power-cycle is performed
+        and finally, we enter debugWIRE mode. If graceful is True, we allow for a failed attempt to connect to
+        the ISP core assuming that we are already in debugWIRE mode. If callback returns False, we wait for a manual power
+        cycle. Otherwise, we assume that the callback function does the job.
+        """
+        try:
+            self.dbg.enable_debugwire(erase_if_locked=allow_erase)
+            self.dbg.power_cycle(callback=callback)
+        except (PymcuprogError, FatalError):
+            raise
+        except Exception as e:
+            self.logger.debug("Graceful exception: %s",e)
+            if not graceful:
+                raise
+        # now start a debugWIRE session
+        return self.warmStart(graceful=False)
+            
+
+
     def pollEvents(self):
         """
         Checks the AvrDebugger for incoming events (breaks)
@@ -877,12 +915,16 @@ def main():
     args = parser.parse_args()
 
     # Setup logging
-    logging.basicConfig(stream=sys.stderr,level=args.verbose.upper(), format ='%(name)s - %(levelname)s - %(message)s')
+    if args.verbose.upper() in ["INFO", "WARNING", "ERROR"]:
+        form = "[%(levelname)s] %(message)s"
+    else:
+        form = "[%(levelname)s] %(name)s: %(message)s"
+    logging.basicConfig(stream=sys.stderr,level=args.verbose.upper(), format = form)
     logger = getLogger()
     #getLogger('pyedbglib.protocols').setLevel(logging.CRITICAL) # supress spurious error messages from pyedbglib
     #getLogger('pymcuprog.nvm').setLevel(logging.CRITICAL) # suppress errors of not connecting: It is intended!
-    #if args.verbose.upper() == "DEBUG":
-    #    getLogger('pyedbglib').setLevel(logging.INFO)
+    if args.verbose.upper() == "DEBUG":
+        getLogger('pyedbglib').setLevel(logging.INFO)
 
     
     if args.version:

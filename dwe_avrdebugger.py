@@ -21,10 +21,10 @@ from pymcuprog.pymcuprog_errors import PymcuprogToolConfigurationError, Pymcupro
 
 
 
-class FatalErrorException(Exception):
+class FatalError(Exception):
     """Termination of session because of a fatal error"""
     def __init__(self, msg=None, code=0):
-        super(FatalErrorException, self).__init__(msg)
+        super(FatalError, self).__init__(msg)
 
 class DWEAvrDebugger(AvrDebugger):
     """
@@ -49,6 +49,9 @@ class DWEAvrDebugger(AvrDebugger):
 
         # Memory info for the device
         self.memory_info = deviceinfo.DeviceMemoryInfo(self.device_info)
+        # ISP interface in order to program DWEN fuse
+        self.spidevice = None
+
 
     def setup_session(self, device, frequency=900000, options=""):
         """
@@ -74,74 +77,17 @@ class DWEAvrDebugger(AvrDebugger):
             # For debugWIRE, first try ISP and switch to debugWIRE
             # Then enable debugWIRE by asking for power-cycle or do it yourself
             # leaving and re-entering progmode seems necessary for getting things done!
-            self.logger.debug("Start in debugWIRE setup")
-            self.spidevice = None
-            if not 'skip_isp' in options:
-                trydw = False
+            if not ('skip_isp' in options):
                 try:
-                    self.logger.debug("Try to connect using ISP")
-                    self.spidevice = NvmAccessProviderCmsisDapSpi(self.transport, self.device_info)
-                    device_id = self.spidevice.read_device_id()
+                    self.enable_debugwire()
+                    self.power_cycle(callback=options.get('callback',None))
                 except Exception as e:
                     self.logger.debug(e)
-                    self.logger.debug("ISP access not possible, will try debugWIRE")
-                    trydw = True
-                if not trydw:
-                    if self.device_info['device_id'] != int.from_bytes(device_id,byteorder='little'):
-                        raise FatalErrorException("Wrong MCU signature: 0x{:X}, expected: 0x{:X}".format(
-                            int.from_bytes(device_id,byteorder='little'),
-                            self.device_info['device_id']))
-                    fuses = self.spidevice.read(self.memory_info.memory_info_by_name('fuses'), 0, 3)
-                    self.logger.debug("Fuses read: %X %X %X",fuses[0], fuses[1], fuses[2])
-                    lockbits = self.spidevice.read(self.memory_info.memory_info_by_name('lockbits'), 0, 1)
-                    self.logger.debug("Lockbits read: %X", lockbits[0])
-                    if (lockbits[0] != 0xFF):
-                        self.logger.debug("MCU is locked. Will be erased.")
-                        self.spidevice.erase()
-                        lockbits = self.spidevice.read(self.memory_info.memory_info_by_name('lockbits'), 0, 1)
-                        self.logger.debug("Lockbits after erase: %X", lockbits[0])
-                        #####self.spidevice.stop()
-                        if 'bootrst_fuse' in self.device_info:
-                            # unprogramm bit 0 in high or extended fuse
-                            self.logger.debug("BOOTRST fuse will be unprogrammed.")
-                            # leave and re-enter programming mode
-                            self.spidevice.stop()
-                            self.spidevice.isp.enter_progmode()
-                            self.spidevice.write(self.memory_info.memory_info_by_name('fuses'),
-                                                    self.device_info['bootrst_fuse'],
-                                                    bytearray([fuses[self.device_info['bootrst_fuse']] | 0x01]) )
-                            #####self.spidevice.stop()
-                            #####self.spidevice.isp.enter_progmode()
-                            #####fuses = self.spidevice.read(self.memory_info.memory_info_by_name('fuses'), 0, 3)
-                            #####self.logger.debug("Fuses read again: %X %X %X",fuses[0], fuses[1], fuses[2])
-                            #####self.spidevice.stop()
-                    # program the DWEN bit
-                    # again, leaving and re-entering programming mode seems to be safe
-                    self.spidevice.stop()
-                    self.spidevice.isp.enter_progmode()
-                    fuses = self.spidevice.read(self.memory_info.memory_info_by_name('fuses'), 0, 3)
-                    self.logger.debug("Fuses read again: %X %X %X",fuses[0], fuses[1], fuses[2])
-                    self.spidevice.stop()
-                    time.sleep(0.2)
-                    self.spidevice.isp.enter_progmode()
-                    fuses[1] &= (0xFF & ~(self.device_info['dwen_mask']))
-                    self.logger.debug("New high fuse: 0x%X", fuses[1])
-                    self.spidevice.write(self.memory_info.memory_info_by_name('fuses'), 1,
-                                            fuses[1:2])
-                    fuses = self.spidevice.read(self.memory_info.memory_info_by_name('fuses'), 0, 3)
-                    self.logger.debug("Fuses read again: %X %X %X",fuses[0], fuses[1], fuses[2])
-                    self.spidevice.stop()
-                    self.power_cycle(callback=options.get('callback',None))
+                    self.logger.debug("ISP not possible, will try debugWIRE")
+                    
             # now we can hopyfully activate debugWIRE
             self.device = DWENvmAccessProviderCmsisDapDebugwire(self.transport, self.device_info)
             self.device.avr.setup_debug_session()
-            idbytes = self.device.read_device_id()
-            sig = (0x1E<<16) + (idbytes[1]<<8) + idbytes[0]
-            if sig != self.device_info['device_id']:
-                # Some funny special cases of chips pretending to be someone else when in debugWIRE mode
-                if sig == 0x1E930F and self.device_info['device_id'] == 0x1E930A: return # pretends to be a 88P, but is 88
-                if sig == 0x1E940B and self.device_info['device_id'] == 0x1E9406: return # pretends to be a 168P, but is 168
-                if sig == 0x1E950F and self.device_info['device_id'] == 0x1E9514: return # pretends to be a 328P, but is 328                   raise FatalErrorException("Wrong MCU signature: 0x{:X}, expected: 0x{:X}".format(sig, self.device_info['device_id']))
             
     def start_debugging(self, flash_data=None):
         """
@@ -248,7 +194,45 @@ class DWEAvrDebugger(AvrDebugger):
         self.logger.debug("New high fuse: 0x%X", fuses[1])
         self.spidevice.write(self.memory_info.memory_info_by_name('fuses'), 1,
                                          fuses[1:2])
-        self.spidevice.stop()
+        self.spidevice.isp.leave_progmode()
+
+    def enable_debugwire(self, erase_if_locked=True):
+        self.logger.info("Try to connect using ISP")
+        self.spidevice = NvmAccessProviderCmsisDapSpi(self.transport, self.device_info)
+        device_id = int.from_bytes(self.spidevice.read_device_id(),byteorder='little')
+        if self.device_info['device_id'] != device_id:
+            raise FatalError("Wrong MCU signature: 0x{:X}, expected: 0x{:X}".format(
+                device_id,
+                self.device_info['device_id']))
+        fuses = self.spidevice.read(self.memory_info.memory_info_by_name('fuses'), 0, 3)
+        self.logger.debug("Fuses read: %X %X %X",fuses[0], fuses[1], fuses[2])
+        lockbits = self.spidevice.read(self.memory_info.memory_info_by_name('lockbits'), 0, 1)
+        self.logger.debug("Lockbits read: %X", lockbits[0])
+        if (lockbits[0] != 0xFF):
+            self.logger.info("MCU is locked. Will be erased.")
+            self.spidevice.erase()
+            lockbits = self.spidevice.read(self.memory_info.memory_info_by_name('lockbits'), 0, 1)
+            self.logger.debug("Lockbits after erase: %X", lockbits[0])
+            if 'bootrst_fuse' in self.device_info:
+                # unprogramm bit 0 in high or extended fuse
+                self.logger.debug("BOOTRST fuse will be unprogrammed.")
+                bfuse = self.device_info['bootrst_fuse']
+                fuses[bfuse] |= 0x01
+                self.spidevice.write(self.memory_info.memory_info_by_name('fuses'), bfuse, fuses[bfuse:bfuse+1])
+        # program the DWEN bit
+        # leaving and re-entering programming mode is necessary, otherwise write has no effect
+        self.spidevice.isp.leave_progmode()
+        self.spidevice.isp.enter_progmode()
+        fuses[1] &= (0xFF & ~(self.device_info['dwen_mask']))
+        self.logger.debug("New high fuse: 0x%X", fuses[1])
+        self.spidevice.write(self.memory_info.memory_info_by_name('fuses'), 1, fuses[1:2])
+        fuses = self.spidevice.read(self.memory_info.memory_info_by_name('fuses'), 0, 3)
+        fuses = self.spidevice.read(self.memory_info.memory_info_by_name('fuses'), 0, 3) # needs to be done twice!
+        self.logger.debug("Fuses read again: %X %X %X",fuses[0], fuses[1], fuses[2])
+        self.spidevice.isp.leave_progmode()
+        # in order to start a debugWIRE session, a power-cycle is now necessary, but
+        # this has to be taken care of by the calling process
+        
                
     def power_cycle(self, callback=None):
         # ask user for power-cycle and wait for voltage to come up again
@@ -270,8 +254,8 @@ class DWEAvrDebugger(AvrDebugger):
                   time.monotonic() - wait_start < 20:
                     time.sleep(0.1)
                 if read_target_voltage(self.housekeeper) < 1.5:
-                    raise FatalErrorException("Timed out waiting for repowering target")
+                    raise FatalError("Timed out waiting for repowering target")
                 time.sleep(1) # wait for debugWIRE system to be ready to accept connections 
                 return
         if not power_cycle:
-            raise FatalErrorException("Timed out waiting for power-cycle")
+            raise FatalError("Timed out waiting for power-cycle")
