@@ -184,6 +184,8 @@ class DWEAvrDebugger(AvrDebugger):
         self.software_breakpoint_clear_all()
         # disable DW
         self.device.avr.protocol.debugwire_disable()
+        # deactivate the physical interface
+        self.device.stop()
         # now open an ISP programming session again
         if not self.spidevice:
             self.spidevice = NvmAccessProviderCmsisDapSpi(self.transport, self.device_info)
@@ -194,6 +196,9 @@ class DWEAvrDebugger(AvrDebugger):
         self.logger.debug("New high fuse: 0x%X", fuses[1])
         self.spidevice.write(self.memory_info.memory_info_by_name('fuses'), 1,
                                          fuses[1:2])
+        fuses = self.spidevice.read(self.memory_info.memory_info_by_name('fuses'), 0, 3)
+        fuses = self.spidevice.read(self.memory_info.memory_info_by_name('fuses'), 0, 3)
+        self.logger.debug("Fuses read after DWEN disable: %X %X %X",fuses[0], fuses[1], fuses[2])
         self.spidevice.isp.leave_progmode()
 
     def enable_debugwire(self, erase_if_locked=True):

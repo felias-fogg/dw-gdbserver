@@ -1,11 +1,21 @@
 # Changelog
 
-### V0.9.3
+### V0.9.5 (13-Feb-2025)
+- Fixed: After enabling debugWIRE by setting the DWEN fuse and power-cycling, the
+debugging tool is restarted by a
+housekeeper.end\_session()/housekeeper.start\_session() pair.
+With that, debugging works now after having just enabled the debugWIRE mode.
+
+### V0.9.4 (13-Feb-2025)
+- much of the startup/shutdown code is now modularized and ready to be
+  move over to dw-gdbserver
+
+### V0.9.3 (13-Feb-2025)
 - Changed: power_cycle is now a method 
 
 ### V0.9.2 (11-Feb-2025)
 
-- Apparently, one should not request a reset after connecting. REmoving that helped a lot. 
+- Apparently, one should not request a reset after connecting. Removing that helped a lot. 
 - MCUs with Stuck-at-1-bits are identified.
 - Added code to honor the fact that the ATmega88/168/328 pretend to be P-versions when in debugWIRE mode
 - Set the EEARH field in the activation record to EEARl+1. This seems to be the right choice when following the datasheet for the ATmega48. And it led to success in starting thr MCU.

@@ -52,7 +52,13 @@ class DWENvmAccessProviderCmsisDapDebugwire(NvmAccessProviderCmsisDapDebugwire):
             else:
                 raise
 
-
+    def stop(self):
+        """
+        Stop (deactivate) session for UPDI targets
+        """
+        self.logger.debug("debugWIRE-specific de-initialiser")
+        self.avr.deactivate_physical()
+            
     def read(self, memory_info, offset, numbytes):
         """
         Read the memory in chunks

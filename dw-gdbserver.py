@@ -385,6 +385,7 @@ class GdbHandler():
                 else:
                     if not self.dw_mode_active:
                         self.dw_mode_active = self.coldStart(graceful=False, callback= self.sendPowerCycle)
+                        self.sendReplyPacket("debugWIRE mode is now enabled")
                         return
                         # Attach debugger
                         self.logger.debug("Attaching AvrDebugger to device: %s", self.devicename)
@@ -741,7 +742,10 @@ class GdbHandler():
             self.logger.debug("Graceful exception: %s",e)
             if not graceful:
                 raise
-        # now start a debugWIRE session
+        # end current tool session and start a new one
+        self.logger.info("Restart the debugging tool")
+        self.dbg.housekeeper.end_session()
+        self.dbg.housekeeper.start_session()
         return self.warmStart(graceful=False)
             
 
