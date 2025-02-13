@@ -31,11 +31,12 @@ import usb
 from pyedbglib.hidtransport.hidtransportfactory import hid_transport
 import pymcuprog
 from pymcuprog.avrdebugger import AvrDebugger
-from dwe_avrdebugger import DWEAvrDebugger, FatalError
+from dwe_avrdebugger import DWEAvrDebugger
 from pymcuprog.backend import Backend
 from pymcuprog.pymcuprog_main import _setup_tool_connection
 from pymcuprog.nvmspi import NvmAccessProviderCmsisDapSpi
 from pymcuprog.deviceinfo import deviceinfo
+from pymcuprog.utils import read_target_voltage
 
 # alternative debug server that connects to the dw-link hardware debugger
 import dwlink
@@ -44,6 +45,13 @@ class EndOfSession(Exception):
     """Termination of session"""
     def __init__(self, msg=None, code=0):
         super(EndOfSession, self).__init__(msg)
+
+class FatalError(Exception):
+    """Termination of session because of a fatal error"""
+    def __init__(self, msg=None, code=0):
+        super(FatalError, self).__init__(msg)
+
+
 
 class GdbHandler():
     """
@@ -54,6 +62,7 @@ class GdbHandler():
         self.logger = getLogger('GdbHandler')
         self.socket = socket
         self.dbg = avrdebugger
+        self.dw = DebugWIRE(avrdebugger, devicename)
         self.devicename = devicename
         self.powercycle = powercycle
         self.last_SIGVAL = "S00"
@@ -384,32 +393,16 @@ class GdbHandler():
                     self.sendReplyPacket("You have to exit and restart the debugger")
                 else:
                     if not self.dw_mode_active:
-                        self.dw_mode_active = self.coldStart(graceful=False, callback= self.sendPowerCycle)
+                        self.dw_mode_active = self.dw.coldStart(graceful=False, callback= self.sendPowerCycle)
                         self.sendReplyPacket("debugWIRE mode is now enabled")
                         return
-                        # Attach debugger
-                        self.logger.debug("Attaching AvrDebugger to device: %s", self.devicename)
-                        if self.powercycle:
-                            opt = {'callback': self.sendPowerCycle}
-                        else:
-                            opt = ""
-                        self.dbg.setup_session(self.devicename, options=opt)
-                        self.dbg.start_debugging()
-                        #time.sleep(1)
-                        #self.dbg.reset()
-                        # Now read out program counter and check whether it contains stuck to 1 bits
-                        pc = self.dbg.program_counter_read()
-                        self.logger.debug("PC=%X",pc)
-                        if (pc << 1) > self.dbg.device_info['flash_size_bytes']:
-                            raise FatalError("Program counter of MCU has stuck-at-1-bits")
-                        self.logger.debug("Attached")
-                        self.dw_mode_active = True
-                    self.sendReplyPacket("debugWIRE mode is enabled")
+                    else:
+                        self.sendReplyPacket("debugWIRE mode was already enabled")
             elif tokens[1][0:2] == "of":
                 if self.dw_mode_active:
                     self.dw_mode_active = False
                     self.dw_deactivated_once = True
-                    self.dbg.disable_debugwire()
+                    self.dw.disable()
                 self.sendReplyPacket("debugWIRE mode is disabled")
             elif tokens[1] =="":
                 if self.dw_mode_active: self.sendReplyPacket("debugWIRE mode is enabled")
@@ -452,7 +445,7 @@ class GdbHandler():
         # Try to start a debugWIRE debugging session
         # if we are already in debugWIRE mode, this will work
         # if not, one has to use the 'monitor debugwire on' command later on
-        self.dw_mode_active = self.warmStart(graceful=True)
+        self.dw_mode_active = self.dw.warmStart(graceful=True)
         self.logger.debug("dw_mode_active=%d",self.dw_mode_active)            
         self.sendPacket("PacketSize={0:X};qXfer:memory-map:read+".format(self.packet_size))
 
@@ -691,63 +684,6 @@ class GdbHandler():
             #Not Supported
             self.sendPacket("")
 
-    def warmStart(self, graceful=True):
-        """
-        Try to establish a connection to the debugWIRE OCD. If not possible (because we are still in ISP mode) and
-        graceful=True, the function returns false, otherwise true. If not graceful, an exception is thrown if we are
-        unsuccessul in establishing the connection.
-        """
-        try:
-            self.dbg.setup_session(self.devicename, options={'skip_isp': True})
-            idbytes = self.dbg.device.read_device_id()
-            sig = (0x1E<<16) + (idbytes[1]<<8) + idbytes[0]
-            self.logger.debug("Device signature by debugWIRE: %X", sig)
-            self.dbg.start_debugging()
-            self.dbg.reset()
-        except FatalError:
-            raise
-        except Exception as e:
-            self.logger.debug("Graceful exception: %s",e)
-            if graceful:
-                return False  # we will try to connect later
-            else:
-                raise
-        # Now read out program counter and check whether it contains stuck to 1 bits
-        pc = self.dbg.program_counter_read()
-        self.logger.debug("PC=%X",pc)
-        if pc != 0:
-            raise FatalError("Program counter of MCU has stuck-at-1-bits")
-        # Check device signature
-        if sig != self.dbg.device_info['device_id']:
-            # Some funny special cases of chips pretending to be someone else when in debugWIRE mode
-            if sig == 0x1E930F and self.dbg.device_info['device_id'] == 0x1E930A: return # pretends to be a 88P, but is 88
-            if sig == 0x1E940B and self.dbg.device_info['device_id'] == 0x1E9406: return # pretends to be a 168P, but is 168
-            if sig == 0x1E950F and self.dbg.device_info['device_id'] == 0x1E9514: return # pretends to be a 328P, but is 328
-            raise FatalError("Wrong MCU signature: 0x{:X}, expected: 0x{:X}".format(sig, self.dbg.device_info['device_id']))
-        return True
-
-    def coldStart(self, graceful=False, callback=None, allow_erase=True):
-        """
-        On the assumption that we are in ISP mode, first DWEN is programmed, then a power-cycle is performed
-        and finally, we enter debugWIRE mode. If graceful is True, we allow for a failed attempt to connect to
-        the ISP core assuming that we are already in debugWIRE mode. If callback returns False, we wait for a manual power
-        cycle. Otherwise, we assume that the callback function does the job.
-        """
-        try:
-            self.dbg.enable_debugwire(erase_if_locked=allow_erase)
-            self.dbg.power_cycle(callback=callback)
-        except (PymcuprogError, FatalError):
-            raise
-        except Exception as e:
-            self.logger.debug("Graceful exception: %s",e)
-            if not graceful:
-                raise
-        # end current tool session and start a new one
-        self.logger.info("Restart the debugging tool")
-        self.dbg.housekeeper.end_session()
-        self.dbg.housekeeper.start_session()
-        return self.warmStart(graceful=False)
-            
 
 
     def pollEvents(self):
@@ -830,6 +766,176 @@ class GdbHandler():
         if self.dw_mode_active:
             self.dbg.stop_debugging()
 
+
+class DebugWIRE(object):
+    """
+    This class takes care of attaching to and detaching from a debugWIRE target, which is a bit
+    complicated. The target is either in ISP or debugWIRE mode and the transition from ISP to debugWIRE 
+    involves power-cycling the target, which one would not like to do every time connecting to the
+    target. Further, if one does this transition, it is necessary to restart the debugging tool by a 
+    housekeeping end_session/start_session sequence. 
+    """
+    def __init__(self, dbg, devicename):
+        self.dbg = dbg
+        self.spidevice = None
+        self.devicename = devicename
+        self.logger = getLogger('DebugWIRE')
+
+    def warmStart(self, graceful=True):
+        """
+        Try to establish a connection to the debugWIRE OCD. If not possible (because we are still in ISP mode) and
+        graceful=True, the function returns false, otherwise true. If not graceful, an exception is thrown when we are
+        unsuccessul in establishing the connection.
+        """
+        try:
+            self.dbg.setup_session(self.devicename)
+            idbytes = self.dbg.device.read_device_id()
+            sig = (0x1E<<16) + (idbytes[1]<<8) + idbytes[0]
+            self.logger.debug("Device signature by debugWIRE: %X", sig)
+            self.dbg.start_debugging()
+            self.dbg.reset()
+        except FatalError:
+            raise
+        except Exception as e:
+            self.logger.debug("Graceful exception: %s",e)
+            if graceful:
+                return False  # we will try to connect later
+            else:
+                raise
+        # Now read out program counter and check whether it contains stuck to 1 bits
+        pc = self.dbg.program_counter_read()
+        self.logger.debug("PC=%X",pc)
+        if pc != 0:
+            raise FatalError("Program counter of MCU has stuck-at-1-bits")
+        # Check device signature
+        if sig != self.dbg.device_info['device_id']:
+            # Some funny special cases of chips pretending to be someone else when in debugWIRE mode
+            if sig == 0x1E930F and self.dbg.device_info['device_id'] == 0x1E930A: return # pretends to be a 88P, but is 88
+            if sig == 0x1E940B and self.dbg.device_info['device_id'] == 0x1E9406: return # pretends to be a 168P, but is 168
+            if sig == 0x1E950F and self.dbg.device_info['device_id'] == 0x1E9514: return # pretends to be a 328P, but is 328
+            raise FatalError("Wrong MCU signature: 0x{:X}, expected: 0x{:X}".format(sig, self.dbg.device_info['device_id']))
+        return True
+
+    def coldStart(self, graceful=False, callback=None, allow_erase=True):
+        """
+        On the assumption that we are in ISP mode, first DWEN is programmed, then a power-cycle is performed
+        and finally, we enter debugWIRE mode. If graceful is True, we allow for a failed attempt to connect to
+        the ISP core assuming that we are already in debugWIRE mode. If callback is Null or returns False, 
+        we wait for a manual power cycle. Otherwise, we assume that the callback function does the job.
+        """
+        try:
+            self.enable(erase_if_locked=allow_erase)
+            self.powerCycle(callback=callback)
+        except (PymcuprogError, FatalError):
+            raise
+        except Exception as e:
+            self.logger.debug("Graceful exception: %s",e)
+            if not graceful:
+                raise
+        # end current tool session and start a new one
+        self.logger.info("Restart the debugging tool")
+        self.dbg.housekeeper.end_session()
+        self.dbg.housekeeper.start_session()
+        # now start the debugWIRE session
+        return self.warmStart(graceful=False)
+            
+               
+    def powerCycle(self, callback=None):
+        # ask user for power-cycle and wait for voltage to come up again
+        wait_start = time.monotonic()
+        last_message = 0
+        magic = False
+        if callback:
+            magic = callback()
+        if magic: # callback has done all the work
+            return
+        while time.monotonic() - wait_start < 150:
+            if (time.monotonic() - last_message > 20):
+                print("*** Please power-cycle the target system ***")
+                last_message = time.monotonic()
+            if read_target_voltage(self.dbg.housekeeper) < 0.5:
+                wait_start = time.monotonic()
+                self.logger.debug("Power-cycle recognized")
+                while  read_target_voltage(self.dbg.housekeeper) < 1.5 and \
+                  time.monotonic() - wait_start < 20:
+                    time.sleep(0.1)
+                if read_target_voltage(self.dbg.housekeeper) < 1.5:
+                    raise FatalError("Timed out waiting for repowering target")
+                time.sleep(1) # wait for debugWIRE system to be ready to accept connections 
+                return
+            time.sleep(0.1)
+        raise FatalError("Timed out waiting for power-cycle")
+
+    def disable(self):
+        """
+        Disables debugWIRE and unprograms the DWEN fusebit. After this call,
+        there is no connection to the target anymore. For this reason all critical things
+        needs to be done before, such as cleaning up breakpoints. 
+        """
+        # clear all breakpoints
+        self.dbg.software_breakpoint_clear_all()
+        # disable DW
+        self.dbg.device.avr.protocol.debugwire_disable()
+        # deactivate the physical interface
+        self.dbg.device.stop()
+        # now open an ISP programming session again
+        if not self.spidevice:
+            self.spidevice = NvmAccessProviderCmsisDapSpi(self.dbg.transport, self.dbg.device_info)
+        self.spidevice.isp.enter_progmode()
+        fuses = self.spidevice.read(self.dbg.memory_info.memory_info_by_name('fuses'), 0, 3)
+        self.logger.debug("Fuses read: %X %X %X",fuses[0], fuses[1], fuses[2])
+        fuses[1] |= self.dbg.device_info['dwen_mask']
+        self.logger.debug("New high fuse: 0x%X", fuses[1])
+        self.spidevice.write(self.dbg.memory_info.memory_info_by_name('fuses'), 1,
+                                         fuses[1:2])
+        fuses = self.spidevice.read(self.dbg.memory_info.memory_info_by_name('fuses'), 0, 3)
+        fuses = self.spidevice.read(self.dbg.memory_info.memory_info_by_name('fuses'), 0, 3)
+        self.logger.debug("Fuses read after DWEN disable: %X %X %X",fuses[0], fuses[1], fuses[2])
+        self.spidevice.isp.leave_progmode()
+
+    def enable(self, erase_if_locked=True):
+        """
+        Enables debugWIRE mpode by programming theDWEN fuse bit. If the chip is locked,
+        it will be erased. In this case, also the BOOTRST fusebit is disabled.
+        Since the implementation of ISP programming is somewhat funny, a few stop/start 
+        sequences and double reads are necessary.
+        """
+        self.logger.info("Try to connect using ISP")
+        self.spidevice = NvmAccessProviderCmsisDapSpi(self.dbg.transport, self.dbg.device_info)
+        device_id = int.from_bytes(self.spidevice.read_device_id(),byteorder='little')
+        if self.dbg.device_info['device_id'] != device_id:
+            raise FatalError("Wrong MCU signature: 0x{:X}, expected: 0x{:X}".format(
+                device_id,
+                self.dbg.device_info['device_id']))
+        fuses = self.spidevice.read(self.dbg.memory_info.memory_info_by_name('fuses'), 0, 3)
+        self.logger.debug("Fuses read: %X %X %X",fuses[0], fuses[1], fuses[2])
+        lockbits = self.spidevice.read(self.dbg.memory_info.memory_info_by_name('lockbits'), 0, 1)
+        self.logger.debug("Lockbits read: %X", lockbits[0])
+        if (lockbits[0] != 0xFF):
+            self.logger.info("MCU is locked. Will be erased.")
+            self.spidevice.erase()
+            lockbits = self.spidevice.read(self.dbg.memory_info.memory_info_by_name('lockbits'), 0, 1)
+            self.logger.debug("Lockbits after erase: %X", lockbits[0])
+            if 'bootrst_fuse' in self.dbg.device_info:
+                # unprogramm bit 0 in high or extended fuse
+                self.logger.debug("BOOTRST fuse will be unprogrammed.")
+                bfuse = self.dbg.device_info['bootrst_fuse']
+                fuses[bfuse] |= 0x01
+                self.spidevice.write(self.dbg.memory_info.memory_info_by_name('fuses'), bfuse, fuses[bfuse:bfuse+1])
+        # program the DWEN bit
+        # leaving and re-entering programming mode is necessary, otherwise write has no effect
+        self.spidevice.isp.leave_progmode()
+        self.spidevice.isp.enter_progmode()
+        fuses[1] &= (0xFF & ~(self.dbg.device_info['dwen_mask']))
+        self.logger.debug("New high fuse: 0x%X", fuses[1])
+        self.spidevice.write(self.dbg.memory_info.memory_info_by_name('fuses'), 1, fuses[1:2])
+        fuses = self.spidevice.read(self.dbg.memory_info.memory_info_by_name('fuses'), 0, 3)
+        fuses = self.spidevice.read(self.dbg.memory_info.memory_info_by_name('fuses'), 0, 3) # needs to be done twice!
+        self.logger.debug("Fuses read again: %X %X %X",fuses[0], fuses[1], fuses[2])
+        self.spidevice.isp.leave_progmode()
+        # in order to start a debugWIRE session, a power-cycle is now necessary, but
+        # this has to be taken care of by the calling process
+        
 
 class AvrGdbRspServer(object):
     def __init__(self, avrdebugger, devicename, port):

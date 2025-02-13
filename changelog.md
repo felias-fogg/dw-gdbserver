@@ -1,6 +1,11 @@
 # Changelog
 
+### V0.9.6 (13-Feb-2025)
+
+- Changed: All debugWIRE relevant start/finish methods have been moved to dw-gdbserver. The code has been placed into a new class DebugWIRE.  
+
 ### V0.9.5 (13-Feb-2025)
+
 - Fixed: After enabling debugWIRE by setting the DWEN fuse and power-cycling, the
 debugging tool is restarted by a
 housekeeper.end\_session()/housekeeper.start\_session() pair.
