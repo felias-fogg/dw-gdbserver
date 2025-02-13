@@ -1,7 +1,7 @@
 """
 debugWIRE GDBServer 
 """
-VERSION="0.9.0"
+VERSION="0.9.3"
 
 SIGINT  = "S02"     # Interrupt  - user interrupted the program (UART ISR) 
 SIGILL  = "S04"     # Illegal instruction
@@ -879,10 +879,10 @@ def main():
     # Setup logging
     logging.basicConfig(stream=sys.stderr,level=args.verbose.upper(), format ='%(name)s - %(levelname)s - %(message)s')
     logger = getLogger()
-    getLogger('pyedbglib.protocols').setLevel(logging.CRITICAL) # supress spurious error messages from pyedbglib
+    #getLogger('pyedbglib.protocols').setLevel(logging.CRITICAL) # supress spurious error messages from pyedbglib
     #getLogger('pymcuprog.nvm').setLevel(logging.CRITICAL) # suppress errors of not connecting: It is intended!
-    if args.verbose.upper() == "DEBUG":
-        getLogger('pyedbglib').setLevel(logging.INFO)
+    #if args.verbose.upper() == "DEBUG":
+    #    getLogger('pyedbglib').setLevel(logging.INFO)
 
     
     if args.version:

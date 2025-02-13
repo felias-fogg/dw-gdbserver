@@ -1,4 +1,7 @@
-# Changelog 
+# Changelog
+
+### V0.9.3
+- Changed: power_cycle is now a method 
 
 ### V0.9.2 (11-Feb-2025)
 

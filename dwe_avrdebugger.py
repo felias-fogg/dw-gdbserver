@@ -115,8 +115,6 @@ class DWEAvrDebugger(AvrDebugger):
                             #####fuses = self.spidevice.read(self.memory_info.memory_info_by_name('fuses'), 0, 3)
                             #####self.logger.debug("Fuses read again: %X %X %X",fuses[0], fuses[1], fuses[2])
                             #####self.spidevice.stop()
-
-
                     # program the DWEN bit
                     # again, leaving and re-entering programming mode seems to be safe
                     self.spidevice.stop()
@@ -133,29 +131,7 @@ class DWEAvrDebugger(AvrDebugger):
                     fuses = self.spidevice.read(self.memory_info.memory_info_by_name('fuses'), 0, 3)
                     self.logger.debug("Fuses read again: %X %X %X",fuses[0], fuses[1], fuses[2])
                     self.spidevice.stop()
-                    # ask user for power-cycle and wait for voltage to come up again
-                    wait_start = time.monotonic()
-                    last_message = 0
-                    if 'callback' in options:
-                        options['callback']()
-                    power_cycle = False
-                    while time.monotonic() - wait_start < 150:
-                        if (time.monotonic() - last_message > 20):
-                            print("*** Please power-cycle the target system ***")
-                            last_message = time.monotonic()
-                        if read_target_voltage(self.housekeeper) < 0.5:
-                            wait_start = time.monotonic()
-                            self.logger.debug("Power-cycle recognized")
-                            while  read_target_voltage(self.housekeeper) < 1.5 and \
-                              time.monotonic() - wait_start < 20:
-                                time.sleep(0.1)
-                            if read_target_voltage(self.housekeeper) < 1.5:
-                                raise FatalErrorException("Timed out waiting for repowering target")
-                            time.sleep(1) # wait for debugWIRE system to be ready to accept connections 
-                            power_cycle = True
-                            break
-                    if not power_cycle:
-                        raise FatalErrorException("Timed out waiting for power-cycle")
+                    self.power_cycle(callback=options.get('callback',None))
             # now we can hopyfully activate debugWIRE
             self.device = DWENvmAccessProviderCmsisDapDebugwire(self.transport, self.device_info)
             self.device.avr.setup_debug_session()
@@ -274,4 +250,28 @@ class DWEAvrDebugger(AvrDebugger):
                                          fuses[1:2])
         self.spidevice.stop()
                
- 
+    def power_cycle(self, callback=None):
+        # ask user for power-cycle and wait for voltage to come up again
+        wait_start = time.monotonic()
+        last_message = 0
+        if callback:
+            callback()
+        else:
+            # perform automatic power cycle
+            return
+        while time.monotonic() - wait_start < 150:
+            if (time.monotonic() - last_message > 20):
+                print("*** Please power-cycle the target system ***")
+                last_message = time.monotonic()
+            if read_target_voltage(self.housekeeper) < 0.5:
+                wait_start = time.monotonic()
+                self.logger.debug("Power-cycle recognized")
+                while  read_target_voltage(self.housekeeper) < 1.5 and \
+                  time.monotonic() - wait_start < 20:
+                    time.sleep(0.1)
+                if read_target_voltage(self.housekeeper) < 1.5:
+                    raise FatalErrorException("Timed out waiting for repowering target")
+                time.sleep(1) # wait for debugWIRE system to be ready to accept connections 
+                return
+        if not power_cycle:
+            raise FatalErrorException("Timed out waiting for power-cycle")
