@@ -1,7 +1,7 @@
 """
 debugWIRE GDBServer 
 """
-VERSION="0.9.8"
+VERSION="0.9.9"
 
 SIGHUO  = "S01"     # no connection
 SIGINT  = "S02"     # Interrupt  - user interrupted the program (UART ISR) 
@@ -754,11 +754,12 @@ class GdbHandler():
                     self.socket.sendall(b"-")
                     self.logger.debug("<- -")
                 # now split into command and data (or parameters) and dispatch
-                for i in range(len(packet_data)+1):
-                    if i == len(packet_data) or not chr(packet_data[i]).isalpha():
-                        break
-                if i == 0:
-                    i = 1 # the case that '!' and '?' are the command chars
+                if chr(packet_data[0]) in '!?ABcCdDFgGHiIkmMpPrRsStTxXzZ':
+                    i = 1
+                else:
+                    for i in range(len(packet_data)+1):
+                        if i == len(packet_data) or not chr(packet_data[i]).isalpha():
+                            break
                 self.dispatch(packet_data[:i].decode('ascii'),packet_data[i:])
                 data = (data.split(b"#")[1])[2:]
 

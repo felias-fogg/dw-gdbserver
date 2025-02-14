@@ -1,8 +1,21 @@
 # Changelog
 
+### V0.9.9 (14-Feb-2025)
+
+- Fixed: The packet parsing procedure had ignored the fact that
+  single-letter commands can be immediately followed by a hex number;
+  now we treat those commands in the right way.
+
 ### V0.9.8 (14-Feb-2025)
 
-- Changed: All debugWIRE relevant start/finish methods have been moved to dw-gdbserver. The code has been placed into a new class DebugWIRE.  
+- Added: `monitor noload` will allow execution even without a previous
+  load command. It will be taken as a request to cache the entire
+  flash in the debugger.
+
+### V0.9.6 (13-Feb-2025)
+
+- Changed: All debugWIRE relevant start/finish methods have been moved
+to dw-gdbserver. The code has been placed into a new class DebugWIRE.
 
 ### V0.9.5 (13-Feb-2025)
 
