@@ -395,6 +395,20 @@ def get_ocd_base(element):
             ocd_base = i.attrib['value']
     return ocd_base
 
+def get_buf_per_page(element):
+    """
+    Fetch data about buffer per page
+    :param element: Element with tag='property-groups'
+    :type element: xml.etree.ElementTree.Element instance
+    :return: ocd address and revision as string
+    :rtype: str
+    """
+    bufpp = None
+    for i in element.iterfind("property-group/property"):
+        if i.attrib['name'] == 'BUFFERS_PER_FLASH_PAGE':
+            bufpp = i.attrib['value']
+    return bufpp
+
 
 def determine_address_size(flash_offset):
     """
@@ -441,6 +455,7 @@ def harvest_from_file(filename):
     osccal_base = None
     dwen_mask = None
     bootrst_fuse = None
+    buf_per_page = None
     
     memories = {}
     for event, elem in xml_iter:
@@ -470,6 +485,7 @@ def harvest_from_file(filename):
                 hv_implementation = get_hv_implementation(elem)
                 ocd_rev = get_ocd_rev(elem)
                 ocd_base = get_ocd_base(elem)
+                buf_per_page = get_buf_per_page(elem)
             if elem.tag == 'register':
                 if elem.attrib['name'].lower() in ['eear', 'eearl']:
                     eear_base = int(elem.attrib['offset'],16) - 0x20
@@ -528,6 +544,8 @@ def harvest_from_file(filename):
         extra_fields += "    'dwen_mask' : " + "%s" % dwen_mask + ",\n"
     if bootrst_fuse != None:
         extra_fields += "    'bootrst_fuse' : " + "%s" % bootrst_fuse + ",\n"
+    if buf_per_page != None:
+        extra_fields += "    'buffer_per_flashpage' : " + "%s" % buf_per_page + ",\n"
     
         
     

@@ -1,7 +1,7 @@
 """
 debugWIRE GDBServer 
 """
-VERSION="0.9.9"
+VERSION="0.9.10"
 
 SIGHUO  = "S01"     # no connection
 SIGINT  = "S02"     # Interrupt  - user interrupted the program (UART ISR) 
@@ -37,6 +37,7 @@ from pymcuprog.pymcuprog_main import _setup_tool_connection
 from pymcuprog.nvmspi import NvmAccessProviderCmsisDapSpi
 from pymcuprog.deviceinfo import deviceinfo
 from pymcuprog.utils import read_target_voltage
+from pymcuprog.pymcuprog_errors import PymcuprogToolConfigurationError, PymcuprogNotSupportedError, PymcuprogError
 
 # alternative debug server that connects to the dw-link hardware debugger
 import dwlink
@@ -524,6 +525,7 @@ class GdbHandler():
                 self.flash[chunkaddr][1].append(0xFF)
                 i += 1
             # now send it page by page
+            # if multipage > 1, then send always multipage batches
             pgaddr = chunkaddr
             while pgaddr < self.flash[chunkaddr][0]:
                 self.logger.debug("Flashing page starting at 0x%X", pgaddr)
@@ -543,18 +545,21 @@ class GdbHandler():
     def flashEraseHandler(self, packet):
         """
         'vFlashErase': we use the information in this command 
-         to prepare a buffer for the program we need to flash
+         to prepare a buffer for the program we need to flash;
+         in case of multi page buffers, we correct start and end address
         """
 
         if self.vflashdone:
             self.vflashdone = False
             self.flash = {} # clear flash (might be a re-load)
         if self.dw_mode_active:
+            if not flash:
+                self.logger.info("Loading executable ...")
             addrstr, sizestr = packet[1:].split(',')
             addr = int(addrstr, 16)
             size = int(sizestr, 16)
-            self.logger.debug("Flash erase: 0x%X, 0x%X", addr, size)
-            self.flash[addr] = [ addr+size, bytearray() ]
+            self.logger.debug("Flash erase: 0x%X -- 0x%X", addr, addr+size)
+            self.flash[newaddr] = [ addr+size, bytearray() ]
             self.sendPacket("OK")
         else:
             self.sendPacket("E05")
@@ -575,13 +580,14 @@ class GdbHandler():
                     self.flash[chunkaddr][1].append(0xFF)
                     i += 1
                 self.flash[chunkaddr][1].extend(data)
-                if len(self.flash[chunkaddr][1]) + chunkaddr >= self.flash[chunkaddr][0]: # should not happen
-                    self.debugger.error("Address out of range in packet vFlashWrite: 0x%X", addr)
+                if len(self.flash[chunkaddr][1]) + chunkaddr > self.flash[chunkaddr][0]: # should not happen
+                    self.logger.error("Address for data 0x%X larger than addr 0x%X in packet vFlashWrite: 0x%X",
+                                          len(self.flash[chunkaddr][1]) + chunkaddr, self.flash[chunkaddr][0], addr)
                     self.sendPacket("E03")
                 else:
                     self.sendPacket("OK")
                 return
-        self.debugger.error("No previous vFlashErase packet for vFlashWrite at: 0x%X", addr)
+        self.logger.error("No previous vFlashErase packet for vFlashWrite at: 0x%X", addr)
         self.sendPacket("E03")
 
     def escape(self, data):
@@ -837,7 +843,7 @@ class DebugWIRE(object):
             if not graceful:
                 raise
         # end current tool session and start a new one
-        self.logger.info("Restart the debugging tool")
+        self.logger.info("Restart the debugging tool before entreing debugWIRE mode")
         self.dbg.housekeeper.end_session()
         self.dbg.housekeeper.start_session()
         # now start the debugWIRE session
@@ -882,9 +888,12 @@ class DebugWIRE(object):
         self.dbg.device.avr.protocol.debugwire_disable()
         # deactivate the physical interface
         self.dbg.device.stop()
+        # it seems necessary to reset the debug tool again
+        self.logger.info("Restarting the debug tool before unprogramming the DWEN fuse")
+        self.dbg.housekeeper.end_session()
+        self.dbg.housekeeper.start_session()
         # now open an ISP programming session again
-        if not self.spidevice:
-            self.spidevice = NvmAccessProviderCmsisDapSpi(self.dbg.transport, self.dbg.device_info)
+        self.spidevice = NvmAccessProviderCmsisDapSpi(self.dbg.transport, self.dbg.device_info)
         self.spidevice.isp.enter_progmode()
         fuses = self.spidevice.read(self.dbg.memory_info.memory_info_by_name('fuses'), 0, 3)
         self.logger.debug("Fuses read: %X %X %X",fuses[0], fuses[1], fuses[2])

@@ -2,7 +2,7 @@
 
 ### What is it good for?
 
-This Python script acts as a GDB server for [**debugWIRE**](https://en.wikipedia.org/wiki/DebugWIRE) MCUs, such as the ATmega328P as known from the Arduino UNO. It interfaces with the [dw-link hardware debugger](https://github.com/felias-fogg/dw-link) by providing a serial to TCP/IP bridge. It can also communicate with Microchip EDBG debuggers such as [Atmel-ICE](https://www.microchip.com/en-us/development-tool/atatmel-ice) and [MPLAB SNAP](https://www.microchip.com/en-us/development-tool/atatmel-ice) (in AVR mode). In the case of Microchip debuggers, it uses the infrastructure provided by [pymcuprog](https://github.com/microchip-pic-avr-tools/pymcuprog) and [pyedgblib](https://github.com/microchip-pic-avr-tools/pyedbglib) to implement a full-blown GDB server. 
+This Python script acts as a GDB server for [**debugWIRE**](https://en.wikipedia.org/wiki/DebugWIRE) MCUs, such as the ATmega328P. It interfaces with the [dw-link hardware debugger](https://github.com/felias-fogg/dw-link) by providing a serial to TCP/IP bridge. It can also communicate with Microchip debuggers such as [Atmel-ICE](https://www.microchip.com/en-us/development-tool/atatmel-ice) and [MPLAB SNAP](https://www.microchip.com/en-us/development-tool/atatmel-ice) (in AVR mode). In the case of Microchip debuggers, it uses the infrastructure provided by [pymcuprog](https://github.com/microchip-pic-avr-tools/pymcuprog) and [pyedgblib](https://github.com/microchip-pic-avr-tools/pyedbglib) to implement a full-blown GDB server. 
 
 By the way, switching to AVR mode in the SNAP debugger is easily accomplished by using avrdude (>= Version 7.3):
 
@@ -14,7 +14,7 @@ By the way, switching to AVR mode in the SNAP debugger is easily accomplished by
 
 If your target board is an Arduino UNO, you have to first modify it by [diconnecting the capacitor](https://wolles-elektronikkiste.de/en/debugging-for-the-arduino-uno-with-atmel-studio) that is responsible for the auto-reset feature. 
 
-Once you have connected one of the above debuggers to a target board, you can start the debug server in a terminal window:
+Once you have connected one of the above debuggers to a target board, you can start the  gdbserver in a terminal window:
 
 ```
 > dw-gdbserver.py -d atmega328p
@@ -55,7 +55,7 @@ When the target chip is not powered by the debugger and is not already in debugW
 
 ### What the future has in store for us
 
-The script has all the basic functionality but still needs some polishing. Breakpoint handling and single-stepping will be improved, and more chips will be supported in the future (currently, it is only ATmega328P). Also, the Xplained boards with the ATmega328P(B) and ATmega168P are not yet tested and will probably need some extra work because the onboard debugger controls the supply voltage and can do the power cycling.
+The script has all the basic functionality but still needs some polishing. Breakpoint handling and single-stepping will be improved, and more chips will be supported in the future. Also, the Xplained boards with the ATmega328P(B) and ATmega168P are not yet tested and will probably need some extra work because the onboard debugger controls the supply voltage and can do the power cycling.
 
 I also plan to have an installable version, and I will provide binaries, which can be used as tools for Arduino IDE 2. And if it all works, it is only a tiny step to generalize it to the JTAG and UPDI AVR MCUs. So, stay tuned.
 
@@ -77,26 +77,31 @@ Except for the [dw-link](https://github.com/felias-fogg/dw-link), this list is c
 
 This is the list of all debugWIRE MCUs, which should all be compatible with dw-gdbserver.py. MCUs tested with this Python script are marked bold. MCUs known not to work with the script are struck out. For the list of MCUs compatible with dw-link, you need to consult the [dw-link manual](https://github.com/felias-fogg/dw-link/blob/master/docs/manual.md).
 
+#### ATtiny (covered by MicroCore):
+
+- **ATtiny13**
+
 #### ATtinys (covered by the ATTinyCore):
 
-* ATtiny13
-* ATtiny43U
-* ATtiny2313(A), ATtiny4313
-* ATtiny24(A), ATtiny44(A), ATtiny84(A)
-* ATtiny441, ATtiny841
-* ATtiny25, ATtiny45, **ATtiny85**
-* ATtiny261(A), ATtiny461(A), ATtiny861(A)
-* ATtiny87, ATtiny167
-* ATtiny828
-* ATtiny48, ATtiny88
-* ATtiny1634
+* **ATtiny43U**
+* **ATtiny2313(A), ATtiny4313**
+* **ATtiny24(A), ATtiny44(A), ATtiny84(A)**
+* <s>**ATtiny441, ATtiny841**</s>
+* **ATtiny25, ATtiny45**, **ATtiny85**
+* **ATtiny261(A), ATtiny461(A), ATtiny861(A)**
+* **ATtiny87, ATtiny167**
+* **ATtiny828**
+* **ATtiny48, ATtiny88**
+* <s>**ATtiny1634**</s>
+
+The problems with ATtiny1634, 841, and 441 probably have something to do with the 4 page erase command. I had similar issues when programming dw-link.  I will have a look into that.
 
 #### ATmegas (covered by MiniCore):
 
 * <s>__ATmega48__</s>, __ATmega48A__, __ATmega48PA__, ATmega48PB, 
 * <s>__ATmega88__</s>, __ATmega88A__, __ATmega88PA__, Atmega88PB, 
 * __ATmega168__, __ATmega168A__, __ATmega168PA__, ATmega168PB, 
-* ATmega328, __ATmega328P__, ATmega328PB
+* **ATmega328**, __ATmega328P__, **ATmega328PB**
 
 ATmega48 and ATmega88 (without the A-suffix) suffer from stuck-at-one bits in the program counter and are therefore not debuggable by GDB. 
 

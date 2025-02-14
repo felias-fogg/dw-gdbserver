@@ -1,5 +1,9 @@
 # Changelog
 
+### V0.9.10 (14-Feb-2025)
+
+- Fixed: Before starting the final ISP session in order to unprogram the DWEN fuse, another restart of the tool is performed by housekeeping end_session/start_session. This fixes the problem I observed earlier when the fusebit was not unprogrammed after leaving the debugger.
+
 ### V0.9.9 (14-Feb-2025)
 
 - Fixed: The packet parsing procedure had ignored the fact that
