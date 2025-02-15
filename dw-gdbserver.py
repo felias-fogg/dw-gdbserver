@@ -1,7 +1,7 @@
 """
 debugWIRE GDBServer 
 """
-VERSION="0.9.10"
+VERSION="0.9.11"
 
 SIGHUP  = "S01"     # no connection
 SIGINT  = "S02"     # Interrupt  - user interrupted the program (UART ISR) 
