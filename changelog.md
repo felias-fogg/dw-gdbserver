@@ -1,5 +1,9 @@
 # Changelog
 
+### V0.9.12 (15-Feb-2025)
+
+- Refactoring: New `MonitorCommand` class
+
 ### V0.9.11 (15-Feb-2025)
 
 - Changed: Cleaned up info messages when starting up

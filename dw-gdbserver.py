@@ -1,7 +1,7 @@
 """
 debugWIRE GDBServer 
 """
-VERSION="0.9.11"
+VERSION="0.9.12"
 
 SIGHUP  = "S01"     # no connection
 SIGINT  = "S02"     # Interrupt  - user interrupted the program (UART ISR) 
@@ -63,16 +63,14 @@ class GdbHandler():
         self.socket = socket
         self.dbg = avrdebugger
         self.dw = DebugWIRE(avrdebugger, devicename)
+        self.mon = MonitorCommand(self)
         self.devicename = devicename
         self.powercycle = powercycle
         self.lastSIGVAL = "S00"
         self.packet_size = 4000
-        self.dw_mode_active = False
-        self.dw_deactivated_once = False
         self.extended_remote_mode = False
         self.flash = {} # indexed by the start address, these are pairs [endaddr, data]
         self.vflashdone = False # set to True after vFlashDone received and will then trigger clearing the flash cache 
-        self.noload = False # when true, one may start execution even without a previous load
 
         self.packettypes = {
             '!'           : self.extendedRemoteHandler,
@@ -147,12 +145,12 @@ class GdbHandler():
         'c': Continue execution, either at current address or at given address
         """
         self.logger.debug("RSP packet: Continue")
-        if not self.dw_mode_active:
+        if not self.mon.dw_mode_active:
             self.logger.debug("Cannot start execution because not connected")
             self.sendDebugMessage("Enable debugWIRE first: 'monitor debugwire on'")
             self.sendSignal(SIGHUP)
             return
-        if not self.vflashdone and not self.noload:
+        if not self.vflashdone and not self.mon.noload:
             self.logger.debug("Cannot start execution without prior load")
             self.sendDebugMessage("Load executable first before starting execution")
             self.sendSignal(SIGILL)
@@ -177,7 +175,7 @@ class GdbHandler():
         'g': Send the current register values R[0:31] + SREAG + SP + PC to GDB
         """
         self.logger.debug("RSP packet: GDB reading registers")
-        if self.dw_mode_active:
+        if self.mon.dw_mode_active:
             regs = self.dbg.register_file_read()
             sreg = self.dbg.status_register_read()
             sp = self.dbg.stack_pointer_read()
@@ -205,7 +203,7 @@ class GdbHandler():
         """
         self.logger.debug("RSP packet: GDB writing registers")
         self.logger.debug("Data received: %s", packet)
-        if self.dw_mode_active:
+        if self.mon.dw_mode_active:
             newRegData = int(packet,16)
             newdata = newRegData.to_bytes(35, byteorder='big')
             self.dbg.register_file_write(newdata[:32])
@@ -226,7 +224,7 @@ class GdbHandler():
         """
         'm': provide GDB with memory contents
         """
-        if not self.dw_mode_active:
+        if not self.mon.dw_mode_active:
             self.logger.debug("RSP packet: memory read, but not connected")
             self.sendPacket("E05")
             return
@@ -286,7 +284,7 @@ class GdbHandler():
         """
         'M': GDB sends new data for MCU memory
         """
-        if not self.dw_mode_active:
+        if not self.mon.dw_mode_active:
             self.logger.debug("RSP packet: Memory write, but not connected")
             self.sendPacket("E05")
             return
@@ -333,7 +331,7 @@ class GdbHandler():
         'p': read register and send to GDB
         currently only PC
         """
-        if not self.dw_mode_active:
+        if not self.mon.dw_mode_active:
             self.logger.debug("RSP packet: read register command, but not connected")
             self.sendPacket("E05")
             return
@@ -361,7 +359,7 @@ class GdbHandler():
         """
         'P': set a single register with a new value given by GDB
         """
-        if not self.dw_mode_active:
+        if not self.mon.dw_mode_active:
             self.logger.debug("RSP packet: write register command, but not connected")
             self.sendPacket("E05")
             return
@@ -404,71 +402,7 @@ class GdbHandler():
         tokens = binascii.unhexlify(payload).decode('ascii').split()
         if len(tokens) == 1:
             tokens += [""]
-        if len(tokens) == 0 or "help".startswith(tokens[0]):
-            self.sendDebugMessage("monitor help                - this help text")
-            self.sendDebugMessage("monitor version             - print version")
-            self.sendDebugMessage("monitor debugwire [on|off]  - activate/deactivate debugWIRE mode")
-            self.sendDebugMessage("monitor reset               - reset MCU")
-            self.sendDebugMessage("monitor noload              - execute even when no code has been loaded")
-            self.sendDebugMessage("monitor timer [freeze|run]  - freeze/run timers when stopped")
-            self.sendDebugMessage("monitor breakpoints [all|software|hardware]")
-            self.sendDebugMessage("                            - allow bps of a certain kind only")
-            self.sendDebugMessage("monitor singlestep [atomic|interruptible]")
-            self.sendDebugMessage("                            - single stepping mode")
-            self.sendDebugMessage("The first option is always the default one")
-            self.sendReplyPacket("If no parameter is specified, the current setting is printed")            
-        elif "version".startswith(tokens[0]):
-            self.sendReplyPacket("dw-gdbserver Version {}".format(VERSION))
-        elif "debugwire".startswith(tokens[0]):
-            if tokens[1][0:2] == "on":
-                if self.dw_deactivated_once:
-                    self.sendDebugMessage("Cannot reactivate debugWIRE")
-                    self.sendReplyPacket("You have to exit and restart the debugger")
-                else:
-                    if not self.dw_mode_active:
-                        self.dw_mode_active = self.dw.coldStart(graceful=False, callback= self.sendPowerCycle)
-                        self.sendReplyPacket("debugWIRE mode is now enabled")
-                        return
-                    else:
-                        self.sendReplyPacket("debugWIRE mode was already enabled")
-            elif tokens[1][0:2] == "of":
-                if self.dw_mode_active:
-                    self.dw_mode_active = False
-                    self.dw_deactivated_once = True
-                    self.dw.disable()
-                self.sendReplyPacket("debugWIRE mode is disabled")
-            elif tokens[1] =="":
-                if self.dw_mode_active: self.sendReplyPacket("debugWIRE mode is enabled")
-                else: self.sendReplyPacket("debugWIRE mode is disabled")
-        elif "reset".startswith(tokens[0]):
-            self.dbg.reset()
-            self.sendReplyPacket("MCU has been reset")
-        elif "timer".startswith(tokens[0]):
-            self.sendReplyPacket("Currently, timers are always frozen when execution is stopped")
-        elif "breakpoints".startswith(tokens[0]):
-            self.sendReplyPacket("Currently, only software breakpoints are used")
-        elif "singlestep".startswith(tokens[0]):
-            self.sendReplyPacket("Currently, single-stepping is always interruptible")
-        elif "noload".startswith(tokens[0]):
-            self.noload = True
-            self.sendReplyPacket("Execution without prior 'load' command is now possible")
-        else:
-            self.sendReplyPacket("Unknown monitor command")
-
-    def sendReplyPacket(self, mes):
-        """
-        Send a packet as a reply to a monitor command to be displayed in the debug console
-        """
-        self.sendPacket(binascii.hexlify(bytearray((mes+"\n").encode('utf-8'))).decode("ascii").upper())
-
-    def sendDebugMessage(self, mes):
-        """
-        Send a packet that always should be displayed in the debug console
-        """
-        self.sendPacket('O' + binascii.hexlify(bytearray((mes+"\n").encode('utf-8'))).decode("ascii").upper())
-    
-    def sendPowerCycle(self):
-        self.sendDebugMessage("*** Please power-cycle the target system ***")
+        self.mon.dispatch(tokens)
 
     def supportedHandler(self, packet):
         """
@@ -480,8 +414,8 @@ class GdbHandler():
         # Try to start a debugWIRE debugging session
         # if we are already in debugWIRE mode, this will work
         # if not, one has to use the 'monitor debugwire on' command later on
-        self.dw_mode_active = self.dw.warmStart(graceful=True)
-        self.logger.debug("dw_mode_active=%d",self.dw_mode_active)            
+        self.mon.dw_mode_active = self.dw.warmStart(graceful=True)
+        self.logger.debug("dw_mode_active=%d",self.mon.dw_mode_active)            
         self.sendPacket("PacketSize={0:X};qXfer:memory-map:read+".format(self.packet_size))
 
     def firstThreadInfoHandler(self, packet):
@@ -524,12 +458,12 @@ class GdbHandler():
         's': single step, perhaps starting at a different address
         """
         self.logger.debug("RSP packet: single-step")
-        if not self.dw_mode_active:
+        if not self.mon.dw_mode_active:
             self.logger.debug("Cannot single-step because not connected")
             self.sendDebugMessage("Enable debugWIRE first: 'monitor debugwire on'")
             self.sendSignal(SIGHUP)
             return
-        if not self.vflashdone and not self.noload:
+        if not self.vflashdone and not self.mon.noload:
             self.logger.debug("Cannot single-step without prior load")
             self.sendDebugMessage("Load executable first before starting execution")
             self.sendSignal(SIGILL)
@@ -598,7 +532,7 @@ class GdbHandler():
         if self.vflashdone:
             self.vflashdone = False
             self.flash = {} # clear flash 
-        if self.dw_mode_active:
+        if self.mon.dw_mode_active:
             if not self.flash:
                 self.logger.info("Loading executable ...")
             addrstr, sizestr = packet[1:].split(',')
@@ -697,7 +631,7 @@ class GdbHandler():
         'vRun': reset and wait to be started from address 0 
         """
         self.logger.debug("RSP packet: run")
-        if not self.dw_mode_active:
+        if not self.mon.dw_mode_active:
             self.logger.debug("Cannot start execution because not connected")
             self.sendDebugMessage("Enable debugWIRE first: 'monitor debugwire on'")
             self.sendSignal(SIGHUP)
@@ -710,7 +644,7 @@ class GdbHandler():
         """
         'z': Remove a breakpoint
         """
-        if not self.dw_mode_active:
+        if not self.mon.dw_mode_active:
             self.sendPacket("E09")
             return
         breakpoint_type = packet[0]
@@ -727,7 +661,7 @@ class GdbHandler():
         """
         'Z': Set a breakpoint
         """
-        if not self.dw_mode_active:
+        if not self.mon.dw_mode_active:
             self.sendPacket("E09")
             return
         breakpoint_type = packet[0]
@@ -745,7 +679,7 @@ class GdbHandler():
         """
         Checks the AvrDebugger for incoming events (breaks)
         """
-        if not self.dw_mode_active: # if DW is not enabled yet, simply return
+        if not self.mon.dw_mode_active: # if DW is not enabled yet, simply return
             return
         pc = self.dbg.poll_event()
         if pc:
@@ -764,6 +698,12 @@ class GdbHandler():
         self.lastmessage = packetData
         self.socket.sendall(message.encode("ascii"))
 
+    def sendDebugMessage(self, mes):
+        """
+        Send a packet that always should be displayed in the debug console
+        """
+        self.sendPacket('O' + binascii.hexlify(bytearray((mes+"\n").encode('utf-8'))).decode("ascii").upper())
+    
     def sendSignal(self, signal):
         """
         Sends signal to GDB
@@ -824,9 +764,125 @@ class GdbHandler():
         """
         Check whether user has already disabled debugWIRE mode. Otherwise, we simply disconnect.
         """
-        if self.dw_mode_active:
+        if self.mon.dw_mode_active:
             self.dbg.stop_debugging()
 
+class MonitorCommand(object):
+    """
+    This class implements all the monitor commands
+    """ 
+    def __init__(self, handler):
+        self.handler = handler
+        self.dw = self.handler.dw
+        self.dw_mode_active = False
+        self.dw_deactivated_once = False
+        self.noload = False # when true, one may start execution even without a previous load
+
+        self.moncmds = {
+            'breakpoints' : self.monBreakpoints,
+            'debugwire'   : self.monDebugwire,
+            'help'        : self.monHelp,
+            'noload'      : self.monNoload,
+            'reset'       : self.monReset,
+            'singlestep'  : self.monSinglestep,
+            'timer'       : self.monTimer,
+            'version'     : self.monVersion
+            }
+
+    def dispatch(self, tokens):
+        if not tokens:
+            self.monHelp(list())
+            return
+        handler = self.monUnknown
+        for cmd in self.moncmds:
+            if cmd.startswith(tokens[0]):
+                if handler == self.monUnknown:
+                    handler = self.moncmds[cmd]
+                else:
+                    handler = self.monAmbigious
+        handler(tokens[1:])
+
+    def monUnknown(self, tokens):
+        self.sendReplyPacket("Unknown 'monitor' command")
+
+    def monAmbigious(self, tokens):
+        self.sendReplyPacket("Ambigious 'monitor' command")
+
+    def monBreakpoints(self, tokens):
+        self.sendReplyPacket("Currently, only software breakpoints are used")
+
+    def monDebugwire(self, tokens):
+        if "on".startswith(tokens[0]) and len(tokens[0]) > 1:
+            if self.dw_deactivated_once:
+                self.handler.sendDebugMessage("Cannot reactivate debugWIRE")
+                self.sendReplyPacket("You have to exit and restart the debugger")
+            else:
+                if not self.dw_mode_active:
+                    self.dw_mode_active = self.dw.coldStart(graceful=False, callback= self.sendPowerCycle)
+                    self.sendReplyPacket("debugWIRE mode is now enabled")
+                    return
+                else:
+                    self.sendReplyPacket("debugWIRE mode was already enabled")
+        elif "off".startswith(tokens[0]) and len(tokens[0]) > 1:
+            if self.dw_mode_active:
+                self.dw_mode_active = False
+                self.dw_deactivated_once = True
+                self.dw.disable()
+            self.sendReplyPacket("debugWIRE mode is disabled")
+        elif tokens[0] =="":
+            if self.dw_mode_active:
+                self.sendReplyPacket("debugWIRE mode is enabled")
+            else:
+                self.sendReplyPacket("debugWIRE mode is disabled")
+
+    def sendPowerCycle(self):
+        self.handler.sendDebugMessage("*** Please power-cycle the target system ***")
+
+    def monHelp(self, tokens):
+        self.handler.sendDebugMessage("monitor help                - this help text")
+        self.handler.sendDebugMessage("monitor version             - print version")
+        self.handler.sendDebugMessage("monitor debugwire [on|off]  - activate/deactivate debugWIRE mode")
+        self.handler.sendDebugMessage("monitor reset               - reset MCU")
+        self.handler.sendDebugMessage("monitor noload              - execute even when no code has been loaded")
+        self.handler.sendDebugMessage("monitor timer [freeze|run]  - freeze/run timers when stopped")
+        self.handler.sendDebugMessage("monitor breakpoints [all|software|hardware]")
+        self.handler.sendDebugMessage("                            - allow bps of a certain kind only")
+        self.handler.sendDebugMessage("monitor singlestep [safe|interruptible]")
+        self.handler.sendDebugMessage("                            - single stepping mode")
+        self.handler.sendDebugMessage("The first option is always the default one")
+        self.sendReplyPacket("If no parameter is specified, the current setting is printed")
+
+    def monNoload(self, tokens):
+        self.noload = True
+        self.sendReplyPacket("Execution without prior 'load' command is now possible")
+
+    def monReset(self, tokens):
+        if self.dw_mode_active:
+            self.handler.dbg.reset()
+            self.sendReplyPacket("MCU has been reset")
+        else:
+            self.sendReplyPacket("Enable debugWIRE mode first") 
+
+    def monSinglestep(self, tokens):
+        self.sendReplyPacket("Currently, single-stepping is always interruptible")
+
+    def monTimer(self, tokens):
+        self.sendReplyPacket("Currently, timers are always frozen when execution is stopped")
+
+    def monVersion(self, tokens):
+        self.sendReplyPacket("dw-gdbserver {}".format(VERSION))
+
+    def sendReplyPacket(self, mes):
+        """
+        Send a packet as a reply to a monitor command to be displayed in the debug console
+        """
+        self.handler.sendPacket(binascii.hexlify(bytearray((mes+"\n").encode('utf-8'))).decode("ascii").upper())
+
+class BreakAndExec(object):
+    """
+    This class manages breakpoints, supports flashwear minimizing execution, and 
+    makes interrupt-safe single stepping possible.
+    """
 
 class DebugWIRE(object):
     """
@@ -1034,7 +1090,7 @@ class AvrGdbRspServer(object):
 
 
     def __del__(self):
-        if self.handler and self.handler.dw_mode_active:
+        if self.handler and self.handler.mon.dw_mode_active:
             self.handler.stopDebugSession() # stop debugWIRE 
         time.sleep(1) # sleep 1 second before closing in order to allow the client to close first
         if self.connection:
