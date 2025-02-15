@@ -1,5 +1,16 @@
 # Changelog
 
+### V0.9.11 (15-Feb-2025)
+
+- Changed: Cleaned up info messages when starting up
+- Changed: Streamlined debug log messages in GDB handler
+- Changed: `continue` and `single step` now receive SIGHUP when not connected to debugWIRE 
+- Added: S and C record handling is now necessary because GDB propagates signals other than SIGTRP
+- Added: Check for overlapping chunks when flashing
+- Added: In dw-harvest.py, the `OCD` property `BUFFERS_PER_FLASH_PAGE` is evaluated. This seems to be the one that signals that the MCU has a 4-page erase command. I yet have to find a way of not deleting the other 3 pages when writing to one of the pages in a block of 4 pages.
+- Fixed: Reading single bytes (even at mis-aligned byte addresses) works now.
+- Added: `monitor noload`, which allows for execution even if no prior `load` command has been executed
+
 ### V0.9.10 (14-Feb-2025)
 
 - Fixed: Before starting the final ISP session in order to unprogram the DWEN fuse, another restart of the tool is performed by housekeeping end_session/start_session. This fixes the problem I observed earlier when the fusebit was not unprogrammed after leaving the debugger.
