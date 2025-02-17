@@ -90,15 +90,13 @@ This is the list of all debugWIRE MCUs, which should all be compatible with dw-g
 * **ATtiny43U**
 * **ATtiny2313(A), ATtiny4313**
 * **ATtiny24(A), ATtiny44(A), ATtiny84(A)**
-* <s>**ATtiny441, ATtiny841**</s>
+* **ATtiny441, ATtiny841**
 * **ATtiny25, ATtiny45**, **ATtiny85**
 * **ATtiny261(A), ATtiny461(A), ATtiny861(A)**
 * **ATtiny87, ATtiny167**
 * **ATtiny828**
 * **ATtiny48, ATtiny88**
-* <s>**ATtiny1634**</s>
-
-The problem with ATtiny1634, 841, and 441 is that they only have a 4-page erase command, and I currently do not see a way to deal with that with pymcuprog. The erase command is always implicit when writing flash and erases all the other pages in the block.
+* **ATtiny1634**
 
 #### ATmegas (covered by MiniCore):
 

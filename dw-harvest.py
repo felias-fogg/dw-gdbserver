@@ -545,7 +545,7 @@ def harvest_from_file(filename):
     if bootrst_fuse != None:
         extra_fields += "    'bootrst_fuse' : " + "%s" % bootrst_fuse + ",\n"
     if buf_per_page != None:
-        extra_fields += "    'buffer_per_flashpage' : " + "%s" % buf_per_page + ",\n"
+        extra_fields += "    'buffers_per_flash_page' : " + "%s" % buf_per_page + ",\n"
     
         
     

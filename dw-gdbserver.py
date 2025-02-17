@@ -1,7 +1,7 @@
 """
 debugWIRE GDBServer 
 """
-VERSION="0.9.12"
+VERSION="0.9.13"
 
 SIGHUP  = "S01"     # no connection
 SIGINT  = "S02"     # Interrupt  - user interrupted the program (UART ISR) 
@@ -58,14 +58,13 @@ class GdbHandler():
     GDB handler
     Maps between incoming GDB requests and AVR debugging protocols (via pymcuprog)
     """
-    def __init__ (self, socket, avrdebugger, devicename, powercycle=True):
+    def __init__ (self, socket, avrdebugger, devicename):
         self.logger = getLogger('GdbHandler')
         self.socket = socket
         self.dbg = avrdebugger
         self.dw = DebugWIRE(avrdebugger, devicename)
-        self.mon = MonitorCommand(self)
+        self.mon = MonitorCommand()
         self.devicename = devicename
-        self.powercycle = powercycle
         self.lastSIGVAL = "S00"
         self.packet_size = 4000
         self.extended_remote_mode = False
@@ -76,7 +75,7 @@ class GdbHandler():
             '!'           : self.extendedRemoteHandler,
             '?'           : self.stopReasonHandler,
             'c'           : self.continueHandler,
-            'C'           : self.continueHandler, # signal will be ignored
+            'C'           : self.continueWithSignalHandler, # signal will be ignored
             'D'           : self.detachHandler,
             'g'           : self.getRegisterHandler,
             'G'           : self.setRegisterHandler,
@@ -96,7 +95,7 @@ class GdbHandler():
           # 'Q'           : general set commands - no relevant cases
           # 'R'           : run command - never used because vRun is supported
             's'           : self.stepHandler,
-            'S'           : self.stepHandler, # signal will be ignored
+            'S'           : self.stepWithSignalHandler, # signal will be ignored
             'T'           : self.threadAliveHandler,
             'vFlashDone'  : self.flashDoneHandler,
             'vFlashErase' : self.flashEraseHandler,
@@ -162,6 +161,12 @@ class GdbHandler():
         self.logger.debug("Resume execution")
         self.dbg.run()
 
+    def continueWithSignalHandler(self, packet):
+        """
+        'C': continue with signal, which we ignore here
+        """
+        self.continueHandler((packet+";").split(";")[1])
+        
     def detachHandler(self, packet):
         """
         'D': Detach. All the real housekeeping will take place when the connection is terminated
@@ -400,10 +405,19 @@ class GdbHandler():
         payload = packet[1:]
         self.logger.debug("RSP packet: monitor command: %s",binascii.unhexlify(payload).decode('ascii'))
         tokens = binascii.unhexlify(payload).decode('ascii').split()
-        if len(tokens) == 1:
-            tokens += [""]
-        self.mon.dispatch(tokens)
+        response = self.mon.dispatch(tokens)
+        if response[0] == 'dwon':
+            self.dw.coldStart(graceful=False, callback=self.sendPowerCycle)
+        elif response[0] == 'dwoff':
+            self.dw.disable()
+        elif response[0] == 'reset':
+            self.dbg.reset()
+        self.sendReplyPacket(response[1])
 
+    def sendPowerCycle(self):
+        self.sendDebugMessage("*** Please power-cycle the target system ***")
+
+        
     def supportedHandler(self, packet):
         """
         'qSupported': query for features supported by the gbdserver; in our case packet size and memory map
@@ -475,6 +489,12 @@ class GdbHandler():
         self.logger.debug("Single-step")
         self.dbg.step()
         self.sendSignal(SIGTRAP)
+
+    def stepWithSignalHandler(self, packet):
+        """
+        'S': single-step with signal, which we ignore here
+        """
+        self.stepHandler((packet+";").split(";")[1])
  
     def threadAliveHandler(self, packet):
         """
@@ -493,7 +513,7 @@ class GdbHandler():
             if (self.flash[x][0] > y):
                 self.logger.critical("Chunk starting at 0x%04X overlaps chunk starting at 0x%04X", x, y)
         pgsiz = self.dbg.memory_info.memory_info_by_name('flash')['page_size']
-        multbuf = self.dbg.device_info.get('buffer_per_flashpage',1)
+        multbuf = self.dbg.device_info.get('buffers_per_flash_page',1)
         mpgsiz = pgsiz*multbuf
         self.logger.info("Starting to flash ...")
         memtype = self.dbg.device.avr.memtype_write_from_string('flash')
@@ -507,16 +527,19 @@ class GdbHandler():
             pgaddr = chunkaddr
             while pgaddr < self.flash[chunkaddr][0]:
                 self.logger.debug("Flashing page starting at 0x%X", pgaddr)
-                currentpage = self.dbg.flash_read(pgaddr, mpgsiz)
+                currentpage = bytearray([])
+                for p in range(multbuf):
+                    currentpage += self.dbg.flash_read(pgaddr+(p*pgsiz), pgsiz)
                 if currentpage == self.flash[chunkaddr][1][pgaddr-chunkaddr:pgaddr-chunkaddr+mpgsiz]:
                     self.logger.debug("Skip flashing page because already flashed at 0x%X", pgaddr)
                 else:
+                    self.logger.debug("Flashing from 0x%X to 0x%X", pgaddr, pgaddr+mpgsiz-1)
                     self.dbg.device.avr.write_memory_section(memtype,
                                                                 pgaddr,
                                                                 self.flash[chunkaddr][1][pgaddr-chunkaddr: 
                                                                                          pgaddr-chunkaddr+mpgsiz],
                                                                 pgsiz,
-                                                                allow_blank_skip=True)
+                                                                allow_blank_skip=False)
                 pgaddr += mpgsiz
         self.logger.info("Flash done")
         self.sendPacket("OK")            
@@ -539,7 +562,7 @@ class GdbHandler():
             beg_addr = int(addrstr, 16)
             end_addr = beg_addr + int(sizestr, 16)
             pgsiz = self.dbg.memory_info.memory_info_by_name('flash')['page_size']
-            multbuf = self.dbg.device_info.get('buffer_per_flashpage',1)
+            multbuf = self.dbg.device_info.get('buffers_per_flash_page',1)
             mpgsiz = pgsiz*multbuf
             beg_addr = (beg_addr//mpgsiz)*mpgsiz
             end_addr = ((end_addr+mpgsiz-1)//mpgsiz)*mpgsiz
@@ -698,6 +721,12 @@ class GdbHandler():
         self.lastmessage = packetData
         self.socket.sendall(message.encode("ascii"))
 
+    def sendReplyPacket(self, mes):
+        """
+        Send a packet as a reply to a monitor command to be displayed in the debug console
+        """
+        self.sendPacket(binascii.hexlify(bytearray((mes+"\n").encode('utf-8'))).decode("ascii").upper())
+
     def sendDebugMessage(self, mes):
         """
         Send a packet that always should be displayed in the debug console
@@ -751,7 +780,7 @@ class GdbHandler():
                     self.socket.sendall(b"-")
                     self.logger.debug("<- -")
                 # now split into command and data (or parameters) and dispatch
-                if chr(packet_data[0]) in '!?ABcCdDFgGHiIkmMpPrRsStTxXzZ':
+                if not (chr(packet_data[0]) in 'vqQ'):
                     i = 1
                 else:
                     for i in range(len(packet_data)+1):
@@ -770,10 +799,11 @@ class GdbHandler():
 class MonitorCommand(object):
     """
     This class implements all the monitor commands
+    It manages state variables, gives responses and selects
+    the right action. The return value of the dispatch method is
+    a pair consisting of an action identifier and the string to be displayed.
     """ 
-    def __init__(self, handler):
-        self.handler = handler
-        self.dw = self.handler.dw
+    def __init__(self):
         self.dw_mode_active = False
         self.dw_deactivated_once = False
         self.noload = False # when true, one may start execution even without a previous load
@@ -791,8 +821,9 @@ class MonitorCommand(object):
 
     def dispatch(self, tokens):
         if not tokens:
-            self.monHelp(list())
-            return
+            return(self.monHelp(list()))
+        if len(tokens) == 1:
+            tokens += [""]
         handler = self.monUnknown
         for cmd in self.moncmds:
             if cmd.startswith(tokens[0]):
@@ -800,83 +831,72 @@ class MonitorCommand(object):
                     handler = self.moncmds[cmd]
                 else:
                     handler = self.monAmbigious
-        handler(tokens[1:])
+        return(handler(tokens[1:]))
 
     def monUnknown(self, tokens):
-        self.sendReplyPacket("Unknown 'monitor' command")
+        return("", "Unknown 'monitor' command")
 
     def monAmbigious(self, tokens):
-        self.sendReplyPacket("Ambigious 'monitor' command")
+        return("", "Ambigious 'monitor' command")
 
     def monBreakpoints(self, tokens):
-        self.sendReplyPacket("Currently, only software breakpoints are used")
+        return("", "Currently, only software breakpoints are used")
 
     def monDebugwire(self, tokens):
         if "on".startswith(tokens[0]) and len(tokens[0]) > 1:
             if self.dw_deactivated_once:
-                self.handler.sendDebugMessage("Cannot reactivate debugWIRE")
-                self.sendReplyPacket("You have to exit and restart the debugger")
+                return("", "Cannot reactivate debugWIRE\nYou have to exit and restart the debugger")
             else:
                 if not self.dw_mode_active:
-                    self.dw_mode_active = self.dw.coldStart(graceful=False, callback= self.sendPowerCycle)
-                    self.sendReplyPacket("debugWIRE mode is now enabled")
-                    return
+                    self.dw_mode_active = True
+                    return("dwon", "debugWIRE mode is now enabled")
                 else:
-                    self.sendReplyPacket("debugWIRE mode was already enabled")
+                    return("", "debugWIRE mode was already enabled")
         elif "off".startswith(tokens[0]) and len(tokens[0]) > 1:
             if self.dw_mode_active:
                 self.dw_mode_active = False
                 self.dw_deactivated_once = True
-                self.dw.disable()
-            self.sendReplyPacket("debugWIRE mode is disabled")
+                return("dwoff", "debugWIRE mode is now disabled")
+            else:
+                return("", "debugWIRE mode was already disabled")
         elif tokens[0] =="":
             if self.dw_mode_active:
-                self.sendReplyPacket("debugWIRE mode is enabled")
+                return("", "debugWIRE mode is enabled")
             else:
-                self.sendReplyPacket("debugWIRE mode is disabled")
-
-    def sendPowerCycle(self):
-        self.handler.sendDebugMessage("*** Please power-cycle the target system ***")
+                return("", "debugWIRE mode is disabled")
 
     def monHelp(self, tokens):
-        self.handler.sendDebugMessage("monitor help                - this help text")
-        self.handler.sendDebugMessage("monitor version             - print version")
-        self.handler.sendDebugMessage("monitor debugwire [on|off]  - activate/deactivate debugWIRE mode")
-        self.handler.sendDebugMessage("monitor reset               - reset MCU")
-        self.handler.sendDebugMessage("monitor noload              - execute even when no code has been loaded")
-        self.handler.sendDebugMessage("monitor timer [freeze|run]  - freeze/run timers when stopped")
-        self.handler.sendDebugMessage("monitor breakpoints [all|software|hardware]")
-        self.handler.sendDebugMessage("                            - allow bps of a certain kind only")
-        self.handler.sendDebugMessage("monitor singlestep [safe|interruptible]")
-        self.handler.sendDebugMessage("                            - single stepping mode")
-        self.handler.sendDebugMessage("The first option is always the default one")
-        self.sendReplyPacket("If no parameter is specified, the current setting is printed")
-
+        return("", """monitor help                - this help text
+monitor version             - print version
+monitor debugwire [on|off]  - activate/deactivate debugWIRE mode
+monitor reset               - reset MCU
+monitor noload              - execute even when no code has been loaded
+monitor timer [freeze|run]  - freeze/run timers when stopped
+monitor breakpoints [all|software|hardware]
+                            - allow bps of a certain kind only
+monitor singlestep [safe|interruptible]
+                            - single stepping mode
+The first option is always the default one
+If no parameter is specified, the current setting is returned""")
+        
     def monNoload(self, tokens):
         self.noload = True
-        self.sendReplyPacket("Execution without prior 'load' command is now possible")
+        return("", "Execution without prior 'load' command is now possible")
 
     def monReset(self, tokens):
         if self.dw_mode_active:
-            self.handler.dbg.reset()
-            self.sendReplyPacket("MCU has been reset")
+            return("reset", "MCU has been reset")
         else:
-            self.sendReplyPacket("Enable debugWIRE mode first") 
+            return("","Enable debugWIRE mode first") 
 
     def monSinglestep(self, tokens):
-        self.sendReplyPacket("Currently, single-stepping is always interruptible")
+        return("", "Currently, single-stepping is always interruptible")
 
     def monTimer(self, tokens):
-        self.sendReplyPacket("Currently, timers are always frozen when execution is stopped")
+        return("", "Currently, timers are always frozen when execution is stopped")
 
     def monVersion(self, tokens):
-        self.sendReplyPacket("dw-gdbserver {}".format(VERSION))
-
-    def sendReplyPacket(self, mes):
-        """
-        Send a packet as a reply to a monitor command to be displayed in the debug console
-        """
-        self.handler.sendPacket(binascii.hexlify(bytearray((mes+"\n").encode('utf-8'))).decode("ascii").upper())
+        return("", "dw-gdbserver {}".format(VERSION))
 
 class BreakAndExec(object):
     """

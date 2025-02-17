@@ -119,12 +119,14 @@ class DWETinyAvrTarget(TinyAvrTarget):
 
         while data_to_write:
             chunk = data_to_write[0:write_chunk_size]
-            self.logger.debug("Chunk to write: %s", chunk)
             self.logger.debug("memtype: %s", memory_type)
+            self.logger.debug("start_addr: 0x%X", start_address)
+            self.logger.debug("Chunk to write: %s",  [chunk.hex()[i:i+2] for i in range(0, len(chunk.hex()), 2)])
             if not self.skip_blank_pages or not self.is_blank(chunk) or not allow_blank_skip:
                 self.protocol.memory_write(memory_type, start_address, chunk)
             start_address += write_chunk_size
             data_to_write = data_to_write[write_chunk_size:]
+            self.logger.debug("Bytes left: %d", len(data_to_write))
 
 
 
@@ -155,8 +157,9 @@ class DWETinyAvrTarget(TinyAvrTarget):
         ee_size = eeprom_info[DeviceMemoryInfoKeys.SIZE]
         ocd_addr = device_info.get(DeviceInfoKeysAvr.OCD_BASE)
         ocd_rev = device_info.get('ocd_rev')
+        pagebuffers_per_flash_block = device_info.get('buffers_per_flash_page',1)
         eear_size = device_info.get('eear_size')
-        eearh_addr = device_info.get('eear_base') + 1 # this seems to be genrally OK
+        eearh_addr = device_info.get('eear_base') + eear_size - 1  
         eearl_addr = device_info.get('eear_base')
         eecr_addr = device_info.get('eecr_base')
         eedr_addr = device_info.get('eedr_base')
@@ -185,8 +188,10 @@ class DWETinyAvrTarget(TinyAvrTarget):
         devdata += bytearray([ee_page_size])
         # TINY_OCD_REVISION (1@0x13)
         devdata += bytearray([ocd_rev])
-        # 4 byte gap (4@0x14)
-        devdata += bytearray([0, 0, 0, 0])
+        # TINY_PAGEBUFFERS_PER_FLASH_BLOCK
+        devdata += bytearray([pagebuffers_per_flash_block])
+        # 3 byte gap (3@0x15)
+        devdata += bytearray([0, 0, 0])
         # TINY_OCD_MODULE_ADDRESS (1@0x18)
         devdata += bytearray([ocd_addr & 0xff])
         # TINY_EEARH_BASE (1@0x19)
@@ -202,7 +207,7 @@ class DWETinyAvrTarget(TinyAvrTarget):
         # TINY_OSCCAL_BASE (1@0x1E)
         devdata += bytearray([osccal_addr & 0xFF])
 
-        self.logger.debug("Write all device data: %s", devdata)
+        self.logger.debug("Write all device data: %s", [devdata.hex()[i:i+2] for i in range(0, len(devdata.hex()), 2)])
         self.protocol.write_device_data(devdata)
 
 
