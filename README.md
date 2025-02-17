@@ -28,7 +28,7 @@ Once you have connected one of the above debuggers to a target board, you can st
 
 In another terminal window, you may now start a GDB session:
 
-```bash
+```
 > avr-gdb <progname>.elf
 GNU gdb (GDB) 15.2
 Copyright (C) 2024 Free Software Foundation, Inc.
