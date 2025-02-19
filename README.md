@@ -12,7 +12,7 @@ By the way, switching to AVR mode in the SNAP debugger is easily accomplished by
 
 ### Usage
 
-If your target board is an Arduino UNO, you have to first modify it by [diconnecting the capacitor](https://wolles-elektronikkiste.de/en/debugging-for-the-arduino-uno-with-atmel-studio) that is responsible for the auto-reset feature. 
+If your target board is an Arduino UNO, you have to first modify it by [diconnecting the capacitor](https://debugwire.de/arduino-boards/) that is responsible for the auto-reset feature. 
 
 Once you have connected one of the above debuggers to a target board, you can start the  gdbserver in a terminal window:
 
@@ -26,7 +26,7 @@ Once you have connected one of the above debuggers to a target board, you can st
 
 ```
 
-In another terminal window, you may now start a GDB session:
+In another terminal window, you can now start a GDB session:
 
 ```
 > avr-gdb <progname>.elf
@@ -55,22 +55,22 @@ Note: automatically using hardware breakpoints for read-only addresses.
 
 ### How to get into and out of debugWIRE mode
 
-When the target chip is not powered by the debugger and is not already in debugWIRE mode,  you must request the switch to debugWIRE mode using the command `monitor debugwire on`. You will then be asked by the Python script and in the debug console to power cycle the target system. Once this is done, the chip will stay in this mode, even after terminating the debugging session. You can switch back to normal by using `monitor debugwire off` before you leave the debugger. 
+When the target chip is not powered by the debugger and is not already in debugWIRE mode,  you must request the switch to debugWIRE mode using the command `monitor debugwire on`. You will then be asked by the Python script to power cycle the target system. Once this is done, the chip will stay in this mode, even after terminating the debugging session. You can switch back to normal by using `monitor debugwire off` before you leave the debugger. 
 
 ### What the future has in store for us
 
-The script has all the basic functionality but still needs some polishing. Breakpoint handling and single-stepping will be improved, and more chips will be supported in the future. Also, the Xplained boards with the ATmega328P(B) and ATmega168P are not yet tested and will probably need some extra work because the onboard debugger controls the supply voltage and can do the power cycling.
+The script has all the basic functionality but still needs some polishing. Breakpoint handling and single-stepping will be improved.
 
 I also plan to have an installable version, and I will provide binaries, which can be used as tools for Arduino IDE 2. And if it all works, it is only a tiny step to generalize it to the JTAG and UPDI AVR MCUs. So, stay tuned.
 
 ### List of supported and tested hardware debuggers
 
-Except for the [dw-link](https://github.com/felias-fogg/dw-link), this list is copied from the readme file of [pyedbglib](https://github.com/microchip-pic-avr-tools/pyedbglib). Boldface means that the debuggers have been tested by me.
+Except for the [dw-link](https://github.com/felias-fogg/dw-link), this list is copied from the readme file of [pyedbglib](https://github.com/microchip-pic-avr-tools/pyedbglib). Boldface means that the debuggers have been tested by me and work with this Python script.
 
 * **dw-link** - DIY debugWIRE debugger based on Arduino UNO R3
 * PKOB nano (nEDBG) - on-board debugger on Curiosity Nano
 * MPLAB PICkit 4 In-Circuit Debugger (when in 'AVR mode')
-* MPLAB Snap In-Circuit Debugger (when in 'AVR mode')
+* **MPLAB Snap In-Circuit Debugger** (when in 'AVR mode')
 * **Atmel-ICE**
 * Power Debugger
 * EDBG - on-board debugger on Xplained Pro/Ultra
