@@ -65,9 +65,9 @@ I also plan to have an installable version, and I will provide binaries, which c
 
 ### List of supported and tested hardware debuggers
 
-Except for the [dw-link](https://github.com/felias-fogg/dw-link), this list is copied from the readme file of [pyedbglib](https://github.com/microchip-pic-avr-tools/pyedbglib). Boldface means that the debuggers have been tested by me and work with this Python script.
+Except for [dw-link](https://github.com/felias-fogg/dw-link), this list is copied from the readme file of [pyedbglib](https://github.com/microchip-pic-avr-tools/pyedbglib). Boldface means that the debuggers have been tested by me and work with this Python script.
 
-* **dw-link** - DIY debugWIRE debugger based on Arduino UNO R3
+
 * PKOB nano (nEDBG) - on-board debugger on Curiosity Nano
 * MPLAB PICkit 4 In-Circuit Debugger (when in 'AVR mode')
 * **MPLAB Snap In-Circuit Debugger** (when in 'AVR mode')
@@ -76,6 +76,8 @@ Except for the [dw-link](https://github.com/felias-fogg/dw-link), this list is c
 * EDBG - on-board debugger on Xplained Pro/Ultra
 * mEDBG - on-board debugger on Xplained Mini/Nano
 * JTAGICE3 (firmware version 3.0 or newer)
+* **dw-link** - DIY debugWIRE debugger based on Arduino UNO R3
+
 
 ### List of supported and tested MCUs
 
