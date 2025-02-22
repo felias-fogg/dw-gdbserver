@@ -1,13 +1,14 @@
 """
 debugWIRE GDBServer 
 """
-VERSION="0.9.13"
+VERSION="0.9.14"
 
+NOSIG   = "S00"     # no signal
 SIGHUP  = "S01"     # no connection
 SIGINT  = "S02"     # Interrupt  - user interrupted the program (UART ISR) 
 SIGILL  = "S04"     # Illegal instruction
 SIGTRAP = "S05"     # Trace trap  - stopped on a breakpoint
-SIGABRT = "S06"     # Abort because of a fatal error
+SIGABRT = "S06"     # Abort because of a fatal error or no breakpoint available
 
 import site
 
@@ -28,10 +29,10 @@ import binascii
 import time
 import usb
 
+from pyedbglib.protocols.avr8protocol import Avr8Protocol 
 from pyedbglib.hidtransport.hidtransportfactory import hid_transport
 import pymcuprog
-from pymcuprog.avrdebugger import AvrDebugger
-from dwe_avrdebugger import DWEAvrDebugger
+from xavrdebugger import XAvrDebugger
 from pymcuprog.backend import Backend
 from pymcuprog.pymcuprog_main import  _clk_as_int # _setup_tool_connection
 from pymcuprog.toolconnection import ToolUsbHidConnection, ToolSerialConnection
@@ -64,6 +65,7 @@ class GdbHandler():
         self.dbg = avrdebugger
         self.dw = DebugWIRE(avrdebugger, devicename)
         self.mon = MonitorCommand()
+        self.bp = BreakAndExec(1, self.mon, avrdebugger, self.readFlashWord)
         self.devicename = devicename
         self.lastSIGVAL = "S00"
         self.packet_size = 4000
@@ -155,11 +157,15 @@ class GdbHandler():
             self.sendSignal(SIGILL)
             return
         if packet:
-            self.logger.debug("Set PC to 0x%s",packet)
-            #set PC - note, byte address converted to word address
-            self.dbg.program_counter_write(int(packet,16)>>1)
-        self.logger.debug("Resume execution")
-        self.dbg.run()
+            newpc = int(packet,16)
+        else:
+            newpc = self.dbg.program_counter_read()<<1
+        self.logger.debug("Resume execution at 0x%X", newpc)
+        if self.mon.old_exec:
+            self.dbg.program_counter_write(newpc>>1)
+            self.dbg.run()
+        else: 
+            self.bp.resumeExecution(newpc)
 
     def continueWithSignalHandler(self, packet):
         """
@@ -261,19 +267,7 @@ class GdbHandler():
         elif addrSection == "85" and self.dbg.device_info['interface'].upper() != 'ISP+DW': # user_signature
             data = self.dbg.read_user_signature(iaddr, isize)
         elif addrSection == "00": # flash
-            inewaddr = iaddr
-            inewsize = isize
-            if iaddr % 2 != 0:
-                inewaddr -= 1
-                inewsize += 1
-            if inewsize % 2 != 0: 
-                inewsize += 1
-            data = self.dbg.flash_read(inewaddr, inewsize)
-            if inewaddr != iaddr:
-                data = data[1:]
-                inewsize -= 1
-            if inewsize != isize:
-                data = data[:-1]
+            data = self.flashRead(iaddr, isize)
         else:
             self.logger.error("Illegal memtype in memory read operation: %s", addrSection)
             self.sendPacket("E13")
@@ -282,8 +276,51 @@ class GdbHandler():
         dataString = ""
         for byte in data:
             dataString = dataString + format(byte, '02x')
-        self.logger.debug("Data sent: %s",dataString)
         self.sendPacket(dataString)
+
+    def flashRead(self, addr, size):
+        """ 
+        Read flash contents from cache that had been constructed during loading the file.
+        It is faster and circumvents the problem that with some debuggers only page-sized
+        access is possible. If there is nothing in the cache or it is explicitly disallowed, 
+        fall back to reading the flash page-wise.
+        """
+        self.logger.debug("Trying to read %d bytes starting at 0x%X", size, addr)
+        if self.mon.cache:
+            response = bytearray()
+            csize = size
+            for chunkaddr in sorted(self.flash):
+                if chunkaddr <= addr and addr < self.flash[chunkaddr][0]: #right chunk found
+                    self.logger.debug("Found relevant chunk: 0x%X", chunkaddr)
+                    i = 0
+                    while i < csize and addr < self.flash[chunkaddr][0]:
+                        response.extend(bytes([self.flash[chunkaddr][1][addr-chunkaddr]]))
+                        i += 1
+                        addr += 1
+                    if i < csize: # we reached end of chunk early, there must be another one!
+                        csize -= i
+                        continue
+                    else:
+                        return(response)
+        # if there is not enough data in the cache, we read full pages from memory. This should
+        # work even in case of the mEDBG debugger.
+        pgsiz = self.dbg.memory_info.memory_info_by_name('flash')['page_size']
+        baseaddr = (addr//pgsiz)*pgsiz
+        endaddr = addr+size
+        pnum = ((endaddr - baseaddr) + pgsiz - 1) // pgsiz
+        self.logger.debug("No cache, request %d pages starting at 0x%X", pnum, baseaddr)
+        response = bytearray()        
+        for p in range(pnum):
+            response +=  self.dbg.flash_read(baseaddr+(p*pgsiz), pgsiz)
+        self.logger.debug("Response from page read: %s", response)
+        response = response[addr-baseaddr:addr-baseaddr+size]
+        return(response)
+
+    def readFlashWord(self, addr):
+        """
+        Read one word at an even address from flash (LSB first!).
+        """
+        return(int.from_bytes(self.flashRead(addr, 2), byteorder='little'))
 
     def setMemoryHandler(self, packet):
         """
@@ -324,6 +361,7 @@ class GdbHandler():
             data = self.dbg.write_user_signature(int(addr, 16), data)
         else:
             # Flash write not supported here
+            # This is only done when loading the excutable
             # EACCES
             self.logger.error("Illegal memtype in memory write operation: %s", addrSection)
             self.sendPacket("E13")
@@ -412,7 +450,11 @@ class GdbHandler():
             self.dw.disable()
         elif response[0] == 'reset':
             self.dbg.reset()
+        elif response[0] == 'test':
+            from testcases import runtests
         self.sendReplyPacket(response[1])
+        if response[0] == 'livetest':
+            runtests()
 
     def sendPowerCycle(self):
         self.sendDebugMessage("*** Please power-cycle the target system ***")
@@ -483,12 +525,17 @@ class GdbHandler():
             self.sendSignal(SIGILL)
             return
         if packet:
-            self.logger.debug("Set PC to 0x%s",packet)
-            #set PC - note, byte address converted to word address
-            self.dbg.program_counter_write(int(packet,16)>>1)
-        self.logger.debug("Single-step")
-        self.dbg.step()
-        self.sendSignal(SIGTRAP)
+            newpc = int(packet,16)
+            self.logger.debug("Set PC to 0x%s",newpc)
+        else:
+            newpc = self.dbg.program_counter_read()<<1
+        self.logger.debug("Single-step at 0x%X", newpc)
+        if self.mon.old_exec:
+            self.dbg.program_counter_write(newpc>>1)
+            self.dbg.step()
+            self.sendSignal(SIGTRAP)
+        else:
+            self.sendSignal(self.bp.singleStep(newpc))
 
     def stepWithSignalHandler(self, packet):
         """
@@ -528,8 +575,10 @@ class GdbHandler():
             while pgaddr < self.flash[chunkaddr][0]:
                 self.logger.debug("Flashing page starting at 0x%X", pgaddr)
                 currentpage = bytearray([])
-                for p in range(multbuf):
-                    currentpage += self.dbg.flash_read(pgaddr+(p*pgsiz), pgsiz)
+                if self.mon.fastload:
+                    # interestingly, it is faster to read single pages than a multi-page chunk!
+                    for p in range(multbuf):
+                        currentpage += self.dbg.flash_read(pgaddr+(p*pgsiz), pgsiz)
                 if currentpage == self.flash[chunkaddr][1][pgaddr-chunkaddr:pgaddr-chunkaddr+mpgsiz]:
                     self.logger.debug("Skip flashing page because already flashed at 0x%X", pgaddr)
                 else:
@@ -674,7 +723,10 @@ class GdbHandler():
         addr = packet.split(",")[1]
         self.logger.debug("RSP packet: remove BP of type %s at %s", breakpoint_type, addr)
         if breakpoint_type == "0" or breakpoint_type == "1":
-            self.dbg.software_breakpoint_clear(int(addr, 16))
+            if self.mon.old_exec:
+                self.dbg.software_breakpoint_clear(int(addr, 16))
+            else:
+                self.bp.removeBreakpoint(int(addr, 16))
             self.sendPacket("OK")
         else:
             self.logger.debug("Breakpoint type %s not supported", breakpoint_type)
@@ -692,8 +744,14 @@ class GdbHandler():
         self.logger.debug("RSP packet: set BP of type %s at %s", breakpoint_type, addr)
         length = packet.split(",")[2]
         if breakpoint_type == "0" or breakpoint_type == "1":
-            self.dbg.software_breakpoint_set(int(addr, 16))
-            self.sendPacket("OK")
+            if self.mon.old_exec:
+                self.dbg.software_breakpoint_set(int(addr, 16))
+                self.sendPacket("OK")
+                return
+            if self.bp.insertBreakpoint(int(addr, 16)):
+                self.sendPacket("OK")
+            else:
+                self.sendPacket("E07")
         else:
             self.logger.debug("Breakpoint type %s not supported", breakpoint_type)
             self.sendPacket("")
@@ -737,8 +795,11 @@ class GdbHandler():
         """
         Sends signal to GDB
         """
-        self.sendPacket(signal)
-        self.lastSIGVAL = signal
+        if signal: # do nothing if None
+            self.sendPacket(signal)
+            self.lastSIGVAL = signal
+        else:
+            self.lastSIGVAL = NOSIG
 
     def handleData(self, data):
         while data:
@@ -789,13 +850,327 @@ class GdbHandler():
                 self.dispatch(packet_data[:i].decode('ascii'),packet_data[i:])
                 data = (data.split(b"#")[1])[2:]
 
-    def stopDebugSession(self):
-        """
-        Check whether user has already disabled debugWIRE mode. Otherwise, we simply disconnect.
-        """
-        if self.mon.dw_mode_active:
-            self.dbg.stop_debugging()
 
+                
+class BreakAndExec(object):
+    """
+    This class manages breakpoints, supports flashwear minimizing execution, and 
+    makes interrupt-safe single stepping possible.
+    """
+
+    def __init__(self, hwbps, mon, dbg, readFlashWord):
+        self.logger = getLogger('BreakAndExec')
+        self.hwbps = hwbps
+        self.mon = mon
+        self.dbg = dbg
+        self.readFlashWord = readFlashWord
+        self.hw = [None for x in range(self.hwbps)]
+        self.bp = dict()
+        self.bpactive = 0
+        self.bpstamp = 0
+        self.firsttime = True
+        self.bigmem = self.dbg.memory_info.memory_info_by_name('flash')['size'] > 128*1024 # more than 128 MB
+        if self.bigmem:
+            raise FatalError("Cannot deal with address spaces larger than 128 MB")
+
+
+    def insertBreakpoint(self, address):
+        """
+        Generate a new breakpoint at give address, do not allocate flash or hwbp yet
+        Will return False if no breakpoint can be set.
+        This method will be called immediately before GDB starts executing or single-stepping
+        """
+        if address in self.bp: # bp already set, needs to be activated
+            self.logger.debug("Already existing BP at 0x%X will be re-activated",addr)
+            if not self.bp[address]['active']: # if already active, ignore
+                if self.bpactive >= self.hwbps and self.mon.onlyhwbps:
+                    self.logger.debug("Cannot set breakpoint at 0x%X because there are too many", address)
+                    return False
+                self.bp[address]['active'] = True
+                self.bpactive += 1
+                self.logger.debug("Set BP at 0x%X to active", address)
+            else:
+                self.logger.debug("There is already a BP at 0x%X to active", address)
+        return True
+
+        self.logger.debug("New BP at 0x%X", address)
+        if self.bpactive >= self.hwbps and self.mon.onlyhwbps:
+            self.logger.debug("Too many HWBPs requested. Cannot honor request for BP at 0x%X", address)
+            return False
+        opcode = self.readFlashWord(address)
+        secondword = self.readFlashWord(address+2)
+        self.bpstamp += 1
+        self.bp[address] =  {'inuse' : True, 'active': True, 'inflash': False, 'hwbp' : None,
+                                 'opcode': opcode, 'secondword' : secondword, 'timestamp' : self.bpstamp }
+        self.logger.debug("New BP at 0x%X: %s", address,  self.bp[address])
+        self.bpactive += 1
+        self.logger.debug("Now %d active BPs", self.bpactive)
+        return True
+
+    def removeBreakpoint(self, address):
+        """
+        Will mark a breakpoint as non-active, but it will stay in flash memory.
+        This method is called immmediately after execution is stopped.
+        """
+        if not (address in self.bp) or not self.bp[address]['active']:
+            self.logger.debug("BP at 0x%X was removed before", address)
+            return # was already removed before
+        self.bp[address]['active'] = False
+        self.bpactive -= 1
+        self.logger.debug("BP at 0x%X is now inactive", address)
+        self.logger.debug("Only %d are now active", self.bpactive)
+
+    def updateBreakpoints(self):
+        """
+        This is called directly before execution is started. It will remove inactive breakpoints,
+        will assign the hardware breakpoints to the most recently added breakpoints, and
+        request to set active breakpoints that are not yet in flash into flash.
+        """
+        # remove inactive BPs
+        self.logger.debug("Updating breakpoints before execution")
+        for a in self.bp:
+            if not self.bp[a]['active']:
+                self.logger.debug("BP at 0x%X is not active anymore", a)
+                if self.bp[a]['inflash']:
+                    self.logger.debug("Removed as a SW BP")
+                    self.dbg.software_breakpoint_clear(a)
+                if self.bp[a]['hwbp']:
+                    self.logger.debug("Removed as a HW BP")
+                    self.hw[self.bp[a]['hwbp']-1] = None
+                del self.bp[a]
+        # if this is the first time, breakpoints are updated, then the BP
+        # with the lowest address is probably a temporary breakpoint, so give it highest prio
+        # at least, when started in a IDE, setup is usually a temporary breakpoint
+        if self.firsttime:
+            self.logger.debug("First time assignment of breakpoints")
+            self.firsttime = False
+            if self.bp:
+                sortaddr = sorted(self.bp)
+                self.bp[sortaddr[0]]['timestamp'] = bstamp
+                self.logger.debug("BP at 0x%X got highest priority", sortaddr[0])
+                bstamp += 1
+        # all remaining BPs are active
+        # assign HWBPs to the most recently introduced BPs
+        # but take into account the possibility that hardware breakpoints are not allowed
+        sortedbps = sorted(self.bp.items(), key=lambda entry: entry[1]['timestamp'], reverse=True)
+        self.logger.debug("Sorted BP list: %s", sortedbps)
+        for h in range(min(self.hwbps*(1-self.mon.onlyswbps),len(sortedbps))):
+            self.logger.debug("Consider BP at 0x%X", sortedbps[0])
+            if sortedbps[h][1]['hwbp'] or sortedbps[h][1]['inflash']:
+                self.logger.debug("Is already assigned, either HWBP or SWBP")
+                continue
+            if None in self.hw: # there is still an available hwbp
+                self.logger.debug("There is still a free HWBP at index: ", self.hw.index(None))
+                self.bp[sortedbps[h][0]]['hwbp'] = self.hw.index(None)+1
+                self.hw[self.hw.index(None)] = sortedbps[h][0]
+            else: # steal hwbp from oldest
+                self.logger.debug("Trying to steal HWBP")
+                for steal in reversed(sortedbps[self.hwbps:]):
+                    if steal[1]['hwbp']:
+                        self.logger.debug("BP at 0x%X is a HWBP", steal[0])
+                        self.bp[sortedbps[h][0]]['hwbp'] = steal[1]['hwbp']
+                        self.lgger.debug("Now BP at 0x%X is the HWP", sortedbps[h][0])
+                        self.hw[steal[1]['hwbp']] = sortedbps[h][0]
+                        self.bp[steal[0]]['hwbp'] = None
+                        break
+        # now request SW BPs, if they are not already in flash, and set the HW registers
+        for a in self.bp:
+            if self.bp[a]['inflash']:
+                self.logger.debug("BP at 0x%X is already in flash", a)
+                continue # already in flash
+            if self.bp[a]['hwbp'] > 1:
+                self.logger.debug("This should not happen!")
+                #set HW BP, the '1' case will be handled by run_to
+                # this is future implementation when JTAG or UPDI enter the picture
+                raise FatalError("More than one HW BP!") 
+            if not self.bp[a]['inflash'] and not self.bp[a]['hwbp']:
+                self.logger.debug("BP at 0x%X will now be set as a SW BP")
+                self.dbg.software_breakpoint_set(a)
+                self.bp[a]['inflash'] = True
+
+    def cleanupBreakpoints(self):
+        """
+        Remove all breakpoints from flash
+        """
+        ### You need to cleanup also the corresponding HW BPs
+        self.logger.debug("Deleting all breakpoints ...")
+        self.hw = [None for x in range(self.hwbps)]
+        self.dbg.software_breakpoint_clear_all()
+        self.bp = {}
+        self.bpactive = 0
+
+    def resumeExecution(self, addr):
+        """
+        Start execution at given addr (byte addr). Check whether we are at a breakpoint with
+        a double-word instruction. If so, simulate the instruction and check, whether it is a BP
+        again. If so return SIGTRAP, otherwise continue. That avoids a double reprogramming! 
+        If it is a one-word instruction, the debugger
+        takes care of the execution of this instruction (hopefully).
+        """
+        if addr in self.bp and self.twoWordInstr(self.bp[addr]['opcode']):
+            # two-word intruction and breakpoint: simulate and advance PC
+            self.logger.debug("We are at BP with a two-word instruction at 0x%X. Simulate!", addr)
+            addr = self.simTwoWordInstr(self.bp[addr]['opcode'], self.bp[addr]['secondword'], addr)
+            self.logger.debug("New PC after simulation: 0x%X", addr)
+            self.dbg.program_counter_write(addr>>1)
+            # if new address is again a breakpoint, just return SIGTRAP
+            if addr in self.bp:
+                self.logger.debug("Again a BP at 0x%X. Stop with SIGTRAP", addr) 
+                return SIGTRAP
+        if self.hw[0] != None:
+            self.logger.debug("Run to cursor at 0x%X starting at", self.hw[0], addr)
+            self.dbg.run_to(self.hw[0] >>1)
+        else:
+            self.logger.debug("Now start executing at 0x%X without HWBP", addr)
+            self.dbg.run()
+        return None
+
+    def singleStep(self, addr):
+        """
+        Perform a single step. This can mean to simulate a two-word instruction or ask the hardware debugger
+        to do a single step. 
+        If mon.safe is true, it means that we will make every effort to not end up in the interrupt vector table. 
+        For all straight-line instructions, we will use the hardware breakpoint to break after one step.
+        If an interrupt occurs, we may break in the ISR, if there is a breakpoint, or not notice it at all.
+        For all remaining instruction (except those branching on the I-bit),
+        we clear the I-bit before and set it afterwards (if necessary). 
+        For those branching on the I-Bit,
+        we will evaluate and then set the hardware BP. 
+        """
+        self.logger.debug("One single step at 0x%X", addr)
+        if addr in self.bp:
+            opcode = self.bp[addr]['opcode']
+        else:
+            opcode = self.readFlashWord(addr)
+        if self.twoWordInstr(opcode):
+            self.logger.debug("Two-word instruction")
+            secondword = self.readFlashWord(addr+2)
+            addr = self.simTwoWordInstr(opcode, secondword, addr)
+            self.logger.debug("New PC(byte addr)=0x%X, return SIGTRAP", addr)
+            self.dbg.program_counter_write(addr>>1)
+            return SIGTRAP
+        self.dbg.program_counter_write(addr>>1) # set the actual PC
+        if self.mon.safe == False:
+            self.logger.debug("Safe stepping is false. Use internal stepper, return SIGTRAP")
+            self.dbg.step()
+            return SIGTRAP
+        # now we have to do the dance using the HWBP
+        self.logger.debug("Interrupt-safe stepping begins here")
+        if self.mon.onlyhwbps and self.bpactive >= self.hwbps: # all HWBPs in use
+            self.logger.debug("We need a HWBP now, but all are in use, return SIGABRT")
+            return SIGABRT
+        if (self.hw[0]): # steal HWBP0
+            self.logger.debug("Steal HWBP0 from BP at 0x%X", self.hw[0])
+            self.bp[self.hw[0]]['hwbp'] = None
+            self.bp[self.hw[0]]['inflash'] = True
+            self.dbg.software_breakpoint_set(self.hw[0])
+            self.hw[0] = Null
+        destination = None
+        # compute destination for straight-line instructions and branches on I-Bit
+        if not self.branchInstr(opcode):
+            destination = addr + 2 # execute just this instruction (it is a one-word instr)
+            self.debugger("This is not a branch instruction. Destination=0x%X", destination)
+        if self.branchOnIBit(opcode):
+            destination = self.computeDestinationOfBranch(opcode, addr)
+            self.debugger("Branching on I-Bit. Destination=0x%X", destination)
+        if destination != None:
+            self.logger.debug("Run to cursor..., return None")
+            self.run_to(destination>>1)
+            return None
+        # for the remaining branch instructions, clear I-bit before and set it afterwards (if it was on before)
+        self.logger.debug("Remaining branch instructions")
+        sreg = self.dbg.status_register_read()[0]
+        self.logger.debug("sreg=0x%X", sreg)
+        ibit = sreg & 0x80
+        sreg &= 0x7F # clear I-Bit
+        self.logger.debug("New sreg=0x%X",sreg)
+        self.dbg.status_register_write(bytearray([sreg]))
+        self.logger.debug("Now make a step...")
+        self.dbg.step()
+        sreg = self.dbg.status_register_read()[0]
+        self.logger("New sreg=0x%X", sreg)
+        sreg |= ibit
+        self.logger("Restored sreg=0x%X", sreg)
+        self.dbg.status_register_write(bytearray([sreg]))
+        self.logger.debug("Returning with SIGTRAP")
+        return SIGTRAP
+
+    def branchInstr(self, opcode):
+        if (opcode & 0xFC00) == 0x1000: # CPSE
+            self.logger.debug("branch intruction: CPSE")
+            return True
+        if (opcode & 0xFFEF) == 0x9409: # IJMP / EIJMP
+            self.logger.debug("branch intruction: IJMP / EIJMP")
+            return True
+        if (opcode & 0xFFEE) == 0x9508: # RET, ICALL, RETI, EICALL
+            self.logger.debug("branch intruction: RET, ICALL, RETI. EICALL")
+            return True
+        if (opcode & 0xFD00) == 0x9900: # SBIC, SBIS
+            self.logger.debug("branch intruction: SBIC / SBIS")
+            return True
+        if (opcode & 0xE000) == 0xC000: # RJMP, RCALL
+            self.logger.debug("branch intruction: RJMP, RCALL")
+            return True
+        if (opcode & 0xF800) == 0xF000: # BRBS, BRBC
+            self.logger.debug("branch intruction: BRBS, BRBC")
+            return True
+        if (opcode & 0xFC08) == 0xFC00: # SBRC, SBRS
+            self.logger.debug("branch intruction: SBRC, SBRS")
+            return True
+        
+        return False
+
+    def branchOnIBit(self, opcode):
+        if (opcode & 0xF807) == 0xF007: # BRID, BRIE
+            
+            return True
+
+    def computeDestinationOfBranch(self, opcode, addr):
+        sreg = self.dbg.status_register_read()[0]
+        rdist = ((opcode >> 3) & 0x007F)
+        branch = bool(sreg & 0x80) ^ bool(opcode & 0x0400 != 0)
+        if not branch:
+            self.logger.debug("addr=0x%X, opcode=0x%X, sreg=0x%X, no branch, dest=0x%X",
+                                  addr, opcode, sreg, addr + 2) 
+            return addr + 2
+        else:
+            tsc = rdist - int((rdist << 1) & 2**7) # compute twos complement
+            self.logger.debug("addr=0x%X, opcode=0x%X, sreg=0x%X, branch, dest=0x%X",
+                                  addr, opcode, sreg, addr + 2 + (rdist*2))
+            return addr + 2 + (rdist*2)
+
+    def twoWordInstr(self, opcode):
+        return(((opcode & ~0x01F0) == 0x9000) or ((opcode & ~0x01F0) == 0x9200) or
+                ((opcode & 0x0FE0E) == 0x940C) or ((opcode & 0x0FE0E) == 0x940E))
+
+    def simTwoWordInstr(self, opcode, secondword, addr):
+        """
+        Simulate a two-word instruction with opcode and 2nd word secondword. Update all registers (except PC)
+        and return the (byte-) address where execution will continue.
+        """
+        if (opcode & ~0x1F0) == 0x9000: # lds 
+            register = (opcode & 0x1F0) >> 4
+            val = self.dbg.sram_read(secondword, 1)
+            self.dbg.sram_write(register, val)
+            addr += 4
+        elif (opcode & ~0x1F0) == 0x9200: # sts 
+            register = (opcode & 0x1F0) >> 4
+            val = self.dbg.sram_read(register, 1)
+            self.dbg.sram_write(secondword, val)
+            addr += 4
+        elif (opcode & 0x0FE0E) == 0x940C: # jmp 
+            # since debugWIRE works only on MCUs with a flash address space <= 64 kwords
+            # we do not need to use the bits from the opcode. Just put in a reminder
+            addr = secondword << 1 ## now byte address
+        elif (opcode & 0x0FE0E) == 0x940E: # call
+            returnaddr = (addr + 4) >> 1 # now word address
+            sp = int.from_bytes(self.dbg.steck_pointer_read(),byteorder='little')
+            sp -= 2
+            self.dbg.stack_pointer_write(self.dbg.sram_write(sp-1, returnaddr.to_bytes(2,byteorder='big')))
+            addr = secondword << 1 
+        return addr
+
+    
 class MonitorCommand(object):
     """
     This class implements all the monitor commands
@@ -807,16 +1182,26 @@ class MonitorCommand(object):
         self.dw_mode_active = False
         self.dw_deactivated_once = False
         self.noload = False # when true, one may start execution even without a previous load
+        self.onlyhwbps = False
+        self.onlyswbps = False
+        self.fastload = True
+        self.cache = True
+        self.safe = True
+        self.old_exec = True
 
         self.moncmds = {
             'breakpoints' : self.monBreakpoints,
             'debugwire'   : self.monDebugwire,
+            'Execute'     : self.monExecute,
+            'flashcache'  : self.monFlashCache,
             'help'        : self.monHelp,
+            'load'        : self.monLoad,
             'noload'      : self.monNoload,
             'reset'       : self.monReset,
             'singlestep'  : self.monSinglestep,
             'timer'       : self.monTimer,
-            'version'     : self.monVersion
+            'version'     : self.monVersion,
+            'LiveTests'   : self.monLiveTests,
             }
 
     def dispatch(self, tokens):
@@ -831,6 +1216,10 @@ class MonitorCommand(object):
                     handler = self.moncmds[cmd]
                 else:
                     handler = self.monAmbigious
+        if handler == self.monLiveTests and tokens[0] != "LiveTests":
+            handler = self.monUnknown
+        if handler == self.monExecute and tokens[0] != "Execute":
+            handler = self.monUnknown
         return(handler(tokens[1:]))
 
     def monUnknown(self, tokens):
@@ -840,7 +1229,28 @@ class MonitorCommand(object):
         return("", "Ambigious 'monitor' command")
 
     def monBreakpoints(self, tokens):
-        return("", "Currently, only software breakpoints are used")
+        if not tokens[0]:
+            if self.onlyswbps:
+                return("", "Only software breakpoints allowed")
+            elif self.onlyhwbps:
+                return("", "Only hardware breakpoints allowed")
+            else:
+                return("", "All breakpoints are allowed")
+        elif 'all'.startswith(tokens[0]):
+            self.onlyhwbps = False
+            self.onlyswbps = False
+            return("", "All breakpoints are now allowed")
+        elif 'hardware'.startswith(tokens[0]):
+            self.onlyhwbps = True
+            self.onlyswbps = False
+            return("", "Only hardware breakpoints are now allowed")
+        elif 'software'.startswith(tokens[0]):
+            self.onlyhwbps = False
+            self.onlyswbps = True
+            return("", "Only software breakpoints are now allowed")
+        else:
+            return self.monUnknown(token[0])
+
 
     def monDebugwire(self, tokens):
         if "on".startswith(tokens[0]) and len(tokens[0]) > 1:
@@ -864,13 +1274,38 @@ class MonitorCommand(object):
                 return("", "debugWIRE mode is enabled")
             else:
                 return("", "debugWIRE mode is disabled")
+        else:
+            return self.monUnknown(token[0])
 
+    def monExecute(self,tokens):
+        if ("old".startswith(tokens[0])) or (tokens[0] == "" and self.old_exec == True):
+            self.old_exec = True
+            return("", "Old form of execution is used")
+        elif ("new".startswith(tokens[0])) or (tokens[0] == "" and self.old_exec == False):
+            self.old_exec = False
+            return("", "New form of execution is used")
+        else:
+            return self.monUnknown(tokens[0])
+
+    def monFlashCache(self, tokens):
+        if ("on".startswith(tokens[0]) and len(tokens[0]) > 1) or (tokens[0] == "" and self.cache == True):
+            self.cache = True
+            return("", "Flash memory will be cached")
+        elif ("off".startswith(tokens[0]) and len(tokens[0]) > 1) or (tokens[0] == "" and self.cache == False):
+            self.cache = False
+            return("", "Flash memory will not be cached")
+        else:
+            return self.monUnknown(tokens[0])
+        
     def monHelp(self, tokens):
         return("", """monitor help                - this help text
 monitor version             - print version
 monitor debugwire [on|off]  - activate/deactivate debugWIRE mode
 monitor reset               - reset MCU
 monitor noload              - execute even when no code has been loaded
+monitor load [readbeforewrite|writeonly]
+                            - optimize loading by first reading flash or not
+monitor flashcache [on|off] - use loaded executable as cache 
 monitor timer [freeze|run]  - freeze/run timers when stopped
 monitor breakpoints [all|software|hardware]
                             - allow bps of a certain kind only
@@ -878,7 +1313,17 @@ monitor singlestep [safe|interruptible]
                             - single stepping mode
 The first option is always the default one
 If no parameter is specified, the current setting is returned""")
-        
+
+    def monLoad(self,tokens):
+        if "readbeforewrite".startswith(tokens[0]) or (tokens[0] == "" and self.fastload == True):
+            self.fastload = True
+            return("", "Reading before writing when loading")
+        elif "writeonly".startswith(tokens[0])  or (tokens[0] == "" and self.fastload == False):
+            self.fastload = False
+            return("", "No reading before writing when loading")
+        else:
+            return self.monUnknown(tokens[0])
+
     def monNoload(self, tokens):
         self.noload = True
         return("", "Execution without prior 'load' command is now possible")
@@ -890,19 +1335,24 @@ If no parameter is specified, the current setting is returned""")
             return("","Enable debugWIRE mode first") 
 
     def monSinglestep(self, tokens):
-        return("", "Currently, single-stepping is always interruptible")
+        if "safe".startswith(tokens[0]) or (tokens[0] == "" and self.safe == True):
+            self.safe = True
+            return("", "Single-stepping is interrupt-safe")
+        elif "interruptible".startswith(tokens[0])  or (tokens[0] == "" and self.safe == False):
+            self.safe = False
+            return("", "single-stepping can be interrupted")
+        else:
+            return self.monUnknown(tokens[0])
 
     def monTimer(self, tokens):
         return("", "Currently, timers are always frozen when execution is stopped")
 
+    def monLiveTests(self, tokens):
+        return("test", "Now we are running a number of tests on the real target")
+
     def monVersion(self, tokens):
         return("", "dw-gdbserver {}".format(VERSION))
 
-class BreakAndExec(object):
-    """
-    This class manages breakpoints, supports flashwear minimizing execution, and 
-    makes interrupt-safe single stepping possible.
-    """
 
 class DebugWIRE(object):
     """
@@ -942,7 +1392,7 @@ class DebugWIRE(object):
         # Now read out program counter and check whether it contains stuck to 1 bits
         pc = self.dbg.program_counter_read()
         self.logger.debug("PC=%X",pc)
-        if pc != 0:
+        if pc << 1 > self.dbg.memory_info.memory_info_by_name('flash')['size']:
             raise FatalError("Program counter of MCU has stuck-at-1-bits")
         # Check device signature
         if sig != self.dbg.device_info['device_id']:
@@ -970,7 +1420,7 @@ class DebugWIRE(object):
             if not graceful:
                 raise
         # end current tool session and start a new one
-        self.logger.info("Restart the debugging tool before entreing debugWIRE mode")
+        self.logger.info("Restarting the debugging tool before entering debugWIRE mode")
         self.dbg.housekeeper.end_session()
         self.dbg.housekeeper.start_session()
         # now start the debugWIRE session
@@ -1009,12 +1459,16 @@ class DebugWIRE(object):
         there is no connection to the target anymore. For this reason all critical things
         needs to be done before, such as cleaning up breakpoints. 
         """
+        # stop core
+        self.dbg.device.avr.protocol.stop()
         # clear all breakpoints
         self.dbg.software_breakpoint_clear_all()
         # disable DW
         self.dbg.device.avr.protocol.debugwire_disable()
-        # deactivate the physical interface
-        self.dbg.device.stop()
+        # detach from OCD
+        self.dbg.device.avr.protocol.detach()
+        # De-activate physical interface
+        self.dbg.device.avr.deactivate_physical()
         # it seems necessary to reset the debug tool again
         self.logger.info("Restarting the debug tool before unprogramming the DWEN fuse")
         self.dbg.housekeeper.end_session()
@@ -1056,12 +1510,12 @@ class DebugWIRE(object):
             self.spidevice.erase()
             lockbits = self.spidevice.read(self.dbg.memory_info.memory_info_by_name('lockbits'), 0, 1)
             self.logger.debug("Lockbits after erase: %X", lockbits[0])
-            if 'bootrst_fuse' in self.dbg.device_info:
-                # unprogramm bit 0 in high or extended fuse
-                self.logger.debug("BOOTRST fuse will be unprogrammed.")
-                bfuse = self.dbg.device_info['bootrst_fuse']
-                fuses[bfuse] |= 0x01
-                self.spidevice.write(self.dbg.memory_info.memory_info_by_name('fuses'), bfuse, fuses[bfuse:bfuse+1])
+        if 'bootrst_fuse' in self.dbg.device_info:
+            # unprogramm bit 0 in high or extended fuse
+            self.logger.debug("BOOTRST fuse will be unprogrammed.")
+            bfuse = self.dbg.device_info['bootrst_fuse']
+            fuses[bfuse] |= 0x01
+            self.spidevice.write(self.dbg.memory_info.memory_info_by_name('fuses'), bfuse, fuses[bfuse:bfuse+1])
         # program the DWEN bit
         # leaving and re-entering programming mode is necessary, otherwise write has no effect
         self.spidevice.isp.leave_progmode()
@@ -1110,8 +1564,10 @@ class AvrGdbRspServer(object):
 
 
     def __del__(self):
-        if self.handler and self.handler.mon.dw_mode_active:
-            self.handler.stopDebugSession() # stop debugWIRE 
+        try:
+            self.avrdebugger.stop_debugging()
+        except Exception as e:
+            self.logger.debug("Graceful exception during stopping: %s",e) 
         time.sleep(1) # sleep 1 second before closing in order to allow the client to close first
         if self.connection:
             self.connection.close()
@@ -1207,6 +1663,8 @@ def main():
     getLogger('pymcuprog.nvm').setLevel(logging.CRITICAL) # suppress errors of not connecting: It is intended!
     if args.verbose.upper() == "DEBUG":
         getLogger('pyedbglib').setLevel(logging.INFO)
+    if args.verbose.upper() != "DEBUG":
+        getLogger('pymcuprog.avr8target').setLevel(logging.ERROR) # we do not want to see the "read flash" messages
 
     
     if args.version:
@@ -1250,7 +1708,7 @@ def main():
     logger.info("Connected to %s", transport.hid_device.get_product_string())
 
     logger.info("Starting dw-gdbserver")
-    avrdebugger = DWEAvrDebugger(transport, device)
+    avrdebugger = XAvrDebugger(transport, device)
     server = AvrGdbRspServer(avrdebugger, device, args.port)
     try:
         server.serve()

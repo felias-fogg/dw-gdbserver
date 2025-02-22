@@ -14,13 +14,13 @@ from pymcuprog.avrdebugger import AvrDebugger
 from pymcuprog.deviceinfo import deviceinfo
 from pymcuprog.nvmupdi import NvmAccessProviderCmsisDapUpdi
 from pymcuprog.nvmdebugwire import NvmAccessProviderCmsisDapDebugwire
-from dwe_nvmdebugwire import DWENvmAccessProviderCmsisDapDebugwire
+from xnvmdebugwire import XNvmAccessProviderCmsisDapDebugwire
 from pymcuprog.nvmspi import NvmAccessProviderCmsisDapSpi
 from pymcuprog.pymcuprog_errors import PymcuprogToolConfigurationError, PymcuprogNotSupportedError, PymcuprogError
 
 
 
-class DWEAvrDebugger(AvrDebugger):
+class XAvrDebugger(AvrDebugger):
     """
     AVR debugger wrapper
 
@@ -30,7 +30,7 @@ class DWEAvrDebugger(AvrDebugger):
     :type use_events_for_run_stop_state: boolean
     """
     def __init__(self, transport, device, use_events_for_run_stop_state=True):
-        super(DWEAvrDebugger, self).__init__(transport)
+        super(XAvrDebugger, self).__init__(transport)
         # Gather device info
         # moved here so that we have mem + device info even before dw has been started
         try:
@@ -71,7 +71,7 @@ class DWEAvrDebugger(AvrDebugger):
             # This starts a debugWIRE session. All the complexities of programming and
             # disabling the DWEN fuse bit and power-cycling is delegated to the calling
             # program
-            self.device = DWENvmAccessProviderCmsisDapDebugwire(self.transport, self.device_info)
+            self.device = XNvmAccessProviderCmsisDapDebugwire(self.transport, self.device_info)
             self.device.avr.setup_debug_session()
             
     def start_debugging(self, flash_data=None):
@@ -83,6 +83,9 @@ class DWEAvrDebugger(AvrDebugger):
         """
         self.logger.info("Starting debug session")
         self.device.start()
+
+        if "DEBUGWIRE" in self.device_info['interface'].upper():
+            self.attach(do_break=True)
 
         if self.device_info['interface'].upper() == "UPDI":
             # The UPDI device is now in prog mode

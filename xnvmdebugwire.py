@@ -6,7 +6,7 @@ from pyedbglib.protocols.avr8protocol import Avr8Protocol
 
 from pymcuprog.nvmdebugwire import NvmAccessProviderCmsisDapDebugwire
 from pymcuprog.nvm import NvmAccessProviderCmsisDapAvr
-from dwe_avr8target import DWETinyAvrTarget
+from xavr8target import XTinyAvrTarget
 from pymcuprog.pymcuprog_errors import PymcuprogError
 
 from pymcuprog.deviceinfo.deviceinfo import DeviceMemoryInfo
@@ -16,14 +16,14 @@ from pymcuprog.deviceinfo.memorynames import MemoryNames
 from pymcuprog import utils
 
 
-class DWENvmAccessProviderCmsisDapDebugwire(NvmAccessProviderCmsisDapDebugwire):
+class XNvmAccessProviderCmsisDapDebugwire(NvmAccessProviderCmsisDapDebugwire):
     """
     NVM Access the DW way
     """
 
     def __init__(self, transport, device_info):
         NvmAccessProviderCmsisDapAvr.__init__(self, device_info)
-        self.avr = DWETinyAvrTarget(transport)
+        self.avr = XTinyAvrTarget(transport)
         self.avr.setup_config(device_info)
 
     def __del__(self):

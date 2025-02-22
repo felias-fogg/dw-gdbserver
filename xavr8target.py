@@ -15,13 +15,13 @@ from pymcuprog.pymcuprog_errors import PymcuprogError
 from pymcuprog.avr8target import TinyXAvrTarget, TinyAvrTarget, MegaAvrJtagTarget, XmegaAvrTarget
 
 
-class DWETinyXAvrTarget(TinyXAvrTarget):
+class XTinyXAvrTarget(TinyXAvrTarget):
     """
     Class handling sessions with TinyX AVR targets using the AVR8 generic protocol
     """
 
     def __init__(self, transport):
-        super(DWETinyXAvrTarget, self).__init__(transport)
+        super(XTinyXAvrTarget, self).__init__(transport)
 
     # The next two methods are needed because different targets access the registers
     # in different ways: TinyX and XMega have a regfile mem type, the others have to access
@@ -68,13 +68,13 @@ class DWETinyXAvrTarget(TinyXAvrTarget):
         self.protocol.memory_write(Avr8Protocol.AVR8_MEMTYPE_OCD, 0x18, data)
         
 
-class DWETinyAvrTarget(TinyAvrTarget):
+class XTinyAvrTarget(TinyAvrTarget):
     """
     Implements Tiny AVR (debugWIRE) functionality of the AVR8 protocol
     """
 
     def __init__(self, transport):
-        super(DWETinyAvrTarget, self).__init__(transport)
+        super(XTinyAvrTarget, self).__init__(transport)
 
         # next lines are copied from TinyXAvrTarget 
         if transport.device.product_string.lower().startswith('edbg'):
@@ -271,13 +271,13 @@ class DWETinyAvrTarget(TinyAvrTarget):
         return 0
 
     
-class DWEMegaAvrJtagTarget(MegaAvrJtagTarget):
+class XMegaAvrJtagTarget(MegaAvrJtagTarget):
     """
     Implements Mega AVR (JTAG) functionality of the AVR8 protocol
     """
 
     def __init__(self, transport):
-        super(MegaAvrJtagTarget, self).__init__(transport)
+        super(XMegaAvrJtagTarget, self).__init__(transport)
 
     def regfile_read(self):
         """
@@ -298,13 +298,13 @@ class DWEMegaAvrJtagTarget(MegaAvrJtagTarget):
 
     
         
-class DWEXmegaAvrTarget(XmegaAvrTarget):
+class XXmegaAvrTarget(XmegaAvrTarget):
     """
     Implements XMEGA (PDI) functionality of the AVR8 protocol
     """
 
     def __init__(self, transport):
-        super(XmegaAvrTarget, self).__init__(transport)
+        super(XXmegaAvrTarget, self).__init__(transport)
 
     def setup_debug_session(self):
         """
