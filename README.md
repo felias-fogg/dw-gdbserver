@@ -12,7 +12,7 @@ By the way, switching to AVR mode in the SNAP debugger is easily accomplished by
 
 ### Usage
 
-If your target board is an Arduino UNO, you have to first modify it by [diconnecting the capacitor](https://debugwire.de/arduino-boards/) that is responsible for the auto-reset feature. 
+If your target board is an Arduino UNO, you have to first modify it by [diconnecting the capacitor]([https://debugwire.de/arduino-boards/](https://debugwire.de/arduino-boards/#requirements-on-the-electrical-characteristics-of-the-reset-line)) that is responsible for the auto-reset feature. 
 
 Once you have connected one of the above debuggers to a target board, you can start the  gdbserver in a terminal window:
 
