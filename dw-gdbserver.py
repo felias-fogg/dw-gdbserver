@@ -1,17 +1,14 @@
 """
 debugWIRE GDBServer 
 """
-VERSION="0.9.14"
+VERSION="0.9.15"
 
-NOSIG   = "S00"     # no signal
-SIGHUP  = "S01"     # no connection
-SIGINT  = "S02"     # Interrupt  - user interrupted the program (UART ISR) 
-SIGILL  = "S04"     # Illegal instruction
-SIGTRAP = "S05"     # Trace trap  - stopped on a breakpoint
-SIGABRT = "S06"     # Abort because of a fatal error or no breakpoint available
-
-import site
-
+NOSIG   = 0     # no signal
+SIGHUP  = 1     # no connection
+SIGINT  = 2     # Interrupt  - user interrupted the program (UART ISR) 
+SIGILL  = 4     # Illegal instruction
+SIGTRAP = 5     # Trace trap  - stopped on a breakpoint
+SIGABRT = 6     # Abort because of a fatal error or no breakpoint available
 
 # args, logging
 import time
@@ -40,6 +37,7 @@ from pymcuprog.nvmspi import NvmAccessProviderCmsisDapSpi
 from pymcuprog.deviceinfo import deviceinfo
 from pymcuprog.utils import read_target_voltage
 from pymcuprog.pymcuprog_errors import PymcuprogToolConfigurationError, PymcuprogNotSupportedError, PymcuprogError
+from deviceinfo.devices.alldevices import dev_id, dev_name
 
 # alternative debug server that connects to the dw-link hardware debugger
 import dwlink
@@ -67,7 +65,7 @@ class GdbHandler():
         self.mon = MonitorCommand()
         self.bp = BreakAndExec(1, self.mon, avrdebugger, self.readFlashWord)
         self.devicename = devicename
-        self.lastSIGVAL = "S00"
+        self.lastSIGVAL = 0
         self.packet_size = 4000
         self.extended_remote_mode = False
         self.flash = {} # indexed by the start address, these are pairs [endaddr, data]
@@ -108,7 +106,7 @@ class GdbHandler():
             'z'           : self.removeBreakpointHandler,
             'Z'           : self.addBreakpointHandler,
             }
-            
+
 
     def dispatch(self, cmd, packet):
         """
@@ -120,10 +118,15 @@ class GdbHandler():
             self.logger.debug("Unhandled GDB RSP packet type: %s", cmd)
             self.sendPacket("")
             return
-        
-        if cmd != 'X' and cmd != 'vFlashWrite': # no binary data
-            packet = packet.decode('ascii')
-        self.handler(packet)
+        try:
+            if cmd != 'X' and cmd != 'vFlashWrite': # no binary data
+                packet = packet.decode('ascii')
+            self.handler(packet)
+        except (FatalError, PymcuprogNotSupportedError, PymcuprogError) as e:
+            self.logger.critical(e)
+            self.mon.dw_mode_active = False
+            self.mon.dw_deactivated_once = True
+            self.sendSignal(SIGABRT)
 
     def extendedRemoteHandler(self, packet):
         """
@@ -138,7 +141,7 @@ class GdbHandler():
         '?': Send reason for last stop: the last signal
         """
         self.logger.debug("RSP packet: ask for last stop reason")
-        self.sendPacket(self.lastSIGVAL)
+        self.sendPacket("S{:02X}".format(self.lastSIGVAL))
         self.logger.debug("Reason was %s",self.lastSIGVAL)
 
     def continueHandler(self, packet):
@@ -190,7 +193,7 @@ class GdbHandler():
             regs = self.dbg.register_file_read()
             sreg = self.dbg.status_register_read()
             sp = self.dbg.stack_pointer_read()
-            pc = self.dbg.program_counter_read() << 1 # get PC as word adress
+            pc = self.dbg.program_counter_read() << 1 # get PC as word adress and make a byte address
             regString = ""
             for reg in regs:
                 regString = regString + format(reg, '02x')
@@ -443,18 +446,29 @@ class GdbHandler():
         payload = packet[1:]
         self.logger.debug("RSP packet: monitor command: %s",binascii.unhexlify(payload).decode('ascii'))
         tokens = binascii.unhexlify(payload).decode('ascii').split()
-        response = self.mon.dispatch(tokens)
-        if response[0] == 'dwon':
-            self.dw.coldStart(graceful=False, callback=self.sendPowerCycle)
-        elif response[0] == 'dwoff':
-            self.dw.disable()
-        elif response[0] == 'reset':
-            self.dbg.reset()
-        elif response[0] == 'test':
-            from testcases import runtests
-        self.sendReplyPacket(response[1])
-        if response[0] == 'livetest':
-            runtests()
+        try:
+            response = self.mon.dispatch(tokens)
+            if response[0] == 'dwon':
+                self.dw.coldStart(graceful=False, callback=self.sendPowerCycle)
+            elif response[0] == 'dwoff':
+                self.dw.disable()
+            elif response[0] == 'reset':
+                self.dbg.reset()
+            elif response[0] in [0, 1]:
+                self.dbg.device.avr.protocol.set_byte(Avr8Protocol.AVR8_CTXT_OPTIONS,
+                                                    Avr8Protocol.AVR8_OPT_RUN_TIMERS,
+                                                    response[0])
+            if response[0] == 'livetest':
+                from testcases import runtests
+                runtests()
+        except (FatalError, PymcuprogNotSupportedError, PymcuprogError) as e:
+            self.logger.critical(e)
+            self.mon.dw_mode_active = False
+            self.mon.dw_deactivated_once = True
+            self.sendReplyPacket("Fatal error: %s\nNo execution is possible any longer" % e)
+        else:
+            self.sendReplyPacket(response[1])
+
 
     def sendPowerCycle(self):
         self.sendDebugMessage("*** Please power-cycle the target system ***")
@@ -795,11 +809,14 @@ class GdbHandler():
         """
         Sends signal to GDB
         """
+        self.lastSIGVAL = NOSIG
         if signal: # do nothing if None
-            self.sendPacket(signal)
-            self.lastSIGVAL = signal
-        else:
-            self.lastSIGVAL = NOSIG
+            sreg = self.dbg.status_register_read()[0]
+            spl, sph = self.dbg.stack_pointer_read()
+            pc = self.dbg.program_counter_read() << 1 # get PC as word adress and make a byte address
+            pcstring = binascii.hexlify(pc.to_bytes(4,byteorder='little')).decode('ascii')
+            stoppacket = "T{:02X}20:{:02X};21:{:02X}{:02X};22:{};thread:1;".format(signal, sreg, spl, sph, pcstring)
+            self.sendPacket(stoppacket)
 
     def handleData(self, data):
         while data:
@@ -822,7 +839,7 @@ class GdbHandler():
             elif data[0] == 3: # CTRL-C
                 self.logger.info("Stop")
                 self.dbg.stop()
-                self.sendPacket(SIGTRAP)
+                self.sendPacket(SIGINT)
                 self.socket.sendall(b"+")
                 self.logger.debug("<- +")
                 data = data[1:]
@@ -1187,6 +1204,7 @@ class MonitorCommand(object):
         self.fastload = True
         self.cache = True
         self.safe = True
+        self.timersfreeze = True
         self.old_exec = True
 
         self.moncmds = {
@@ -1340,12 +1358,19 @@ If no parameter is specified, the current setting is returned""")
             return("", "Single-stepping is interrupt-safe")
         elif "interruptible".startswith(tokens[0])  or (tokens[0] == "" and self.safe == False):
             self.safe = False
-            return("", "single-stepping can be interrupted")
+            return("", "Single-stepping can be interrupted")
         else:
             return self.monUnknown(tokens[0])
 
     def monTimer(self, tokens):
-        return("", "Currently, timers are always frozen when execution is stopped")
+        if "freeze".startswith(tokens[0]) or (tokens[0] == "" and self.timersfreeze == True):
+            self.timersfreeze = True
+            return(0, "Timers are frozen when execution is stopped")
+        elif "run".startswith(tokens[0])  or (tokens[0] == "" and self.timersfreeze == False):
+            self.timersfreeze = False
+            return(1, "Timers will run when execution is stopped")
+        else:
+            return self.monUnknown(tokens[0])
 
     def monLiveTests(self, tokens):
         return("test", "Now we are running a number of tests on the real target")
@@ -1400,7 +1425,7 @@ class DebugWIRE(object):
             if sig == 0x1E930F and self.dbg.device_info['device_id'] == 0x1E930A: return # pretends to be a 88P, but is 88
             if sig == 0x1E940B and self.dbg.device_info['device_id'] == 0x1E9406: return # pretends to be a 168P, but is 168
             if sig == 0x1E950F and self.dbg.device_info['device_id'] == 0x1E9514: return # pretends to be a 328P, but is 328
-            raise FatalError("Wrong MCU signature: 0x{:X}, expected: 0x{:X}".format(sig, self.dbg.device_info['device_id']))
+            raise FatalError("Wrong MCU: '{}', expected: '{}'".format(dev_name[sig], dev_name[self.dbg.device_info['device_id']]))
         return True
 
     def coldStart(self, graceful=False, callback=None, allow_erase=True):
@@ -1498,9 +1523,9 @@ class DebugWIRE(object):
         self.spidevice = NvmAccessProviderCmsisDapSpi(self.dbg.transport, self.dbg.device_info)
         device_id = int.from_bytes(self.spidevice.read_device_id(),byteorder='little')
         if self.dbg.device_info['device_id'] != device_id:
-            raise FatalError("Wrong MCU signature: 0x{:X}, expected: 0x{:X}".format(
-                device_id,
-                self.dbg.device_info['device_id']))
+            raise FatalError("Wrong MCU: '{}', expected: '{}'".format(
+                dev_name[device_id],
+                dev_name[self.dbg.device_info['device_id']]))
         fuses = self.spidevice.read(self.dbg.memory_info.memory_info_by_name('fuses'), 0, 3)
         self.logger.debug("Fuses read: %X %X %X",fuses[0], fuses[1], fuses[2])
         lockbits = self.spidevice.read(self.dbg.memory_info.memory_info_by_name('lockbits'), 0, 1)
@@ -1567,12 +1592,15 @@ class AvrGdbRspServer(object):
         try:
             self.avrdebugger.stop_debugging()
         except Exception as e:
-            self.logger.debug("Graceful exception during stopping: %s",e) 
-        time.sleep(1) # sleep 1 second before closing in order to allow the client to close first
-        if self.connection:
-            self.connection.close()
-        if self.gdb_socket:
-            self.gdb_socket.close()
+            self.logger.debug("Graceful exception during stopping: %s",e)
+        finally:
+            time.sleep(1) # sleep 1 second before closing in order to allow the client to close first
+            self.logger.info("Closing socket")
+            if self.gdb_socket:
+                self.gdb_socket.close()
+            self.logger.info("Closing connection")
+            if self.connection:
+                self.connection.close()
 
 
             
@@ -1703,6 +1731,10 @@ def main():
         print("Please specify target MCU with -d option")
         return(1)
             
+    if device.lower() not in dev_id:
+        logger.critical("Device '%s' is not supported by dw-gdbserver", device)
+        sys.exit(1)
+
     transport = hid_transport()
     transport.connect(serial_number=toolconnection.serialnumber, product=toolconnection.tool_name)
     logger.info("Connected to %s", transport.hid_device.get_product_string())

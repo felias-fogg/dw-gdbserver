@@ -1,5 +1,19 @@
 # Changelog
 
+### V0.9.15
+
+- Changed: dw-harvest.py moved to deviceinfo/harvest.py
+- Added: collect.py script in deviceinfo, which collects which MCUs are supported and what is the device ID/name mapping.
+- Added: Early check in main whether device is supported
+- Changed: We now use names instead of signatures in the error messages about the wrong MCU.
+
+- Changed: Signals are now numbers, not strings anymore
+- Changed: Instead of sending S-packets (containing only signal numbers), we now send T-packets with SREG, SP, and PC. Supposedly, this speeds up the time after a stop.
+
+- Added: `monitor timers [freeze|run]` command implemented.
+
+- Fixed: 'Address in use' errors happened regularly when starting dw-gdbserver after fatal errors. This occurs when the gdbserver closes the IP connection first.  To avoid this, fatal errors are now caught on the level of monitor commands or the general handler, and the server is not terminated. This forces the user to terminate the debugger, after which the gdbserver can wait some time and then terminate, freeing the IP port immediately (see https://hea-www.harvard.edu/~fine/Tech/addrinuse.html)
+
 ### V0.9.14 (21-Feb-2025)
 
 - Fixed: Attaching to the AVR core now, because the XPLAINED-Mini board requested it.
@@ -10,7 +24,7 @@
 - Implemented two-word instruction simulation when starting at a breakpoint
 - Implemented interrupt-safe single-stepping (+ the monitor function to enable that: `monitor singlestep safe`)
 - Implemented monitor commands to disable fast loading and flash caching: `monitor load writeonly` and `monitor flashcache off` . Default is `readbeforewrite` and on, respectively.
-- Implemented monitor commands for internal testing purposes: `monitor LiveTests` will initiate a live test of the gdbserver. Here the full command has to written out,
+- Implemented monitor commands for internal testing purposes: `monitor LiveTests` will initiate a live test of the gdbserver. Here the full command has to written out!
 - Implemented monitor command to selectively switch new execution, single -stepping, and breakpoint handling on and off: `monitor Execution [old|new]`. Default is `old`.
 - Renamed classes and modules to x... instead of dwe_ and X... instead of DWE. X standing for 'extended'.
 - Tried out the SNAP, and it works without a hitch, albeit a bit slower than Atmel-ICE. Will measure load times with both.
