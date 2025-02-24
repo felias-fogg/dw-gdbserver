@@ -1,10 +1,8 @@
 # Changelog
 
-### V1.1.3 
+### V1.1.2 (24-Feb-2025)
 
 - Fixed: Crash when stopping with ^C because sendPacket instead of sendSignal was used.
-
-### V1.1.2 (24-Feb-2025)
 
 - Fixed: pyusb worked perfectly under macOS and Linux for enumerating all USB devices, but I got nothing under Windows. So, I removed this package because hidapi is doing all the work anyway.
 
