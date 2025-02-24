@@ -1,5 +1,7 @@
 # dw-gdbserver
 
+*Currently, the gdbserver does not work with all the precompiled debuggers under Windows since they are not compiled with XML support.* 
+
 ### What is it good for?
 
 This Python script acts as a GDB server for [**debugWIRE**](https://debugwire.de) MCUs, such as the ATmega328P. It interfaces with the [dw-link hardware debugger](https://github.com/felias-fogg/dw-link) by providing a serial to TCP/IP bridge. It can also communicate with Microchip debuggers such as [Atmel-ICE](https://www.microchip.com/en-us/development-tool/atatmel-ice) and [MPLAB SNAP](https://www.microchip.com/en-us/development-tool/atatmel-ice) (in AVR mode). In the case of Microchip debuggers, it uses the infrastructure provided by [pymcuprog](https://github.com/microchip-pic-avr-tools/pymcuprog) and [pyedgblib](https://github.com/microchip-pic-avr-tools/pyedbglib) to implement a full-blown GDB server. 
@@ -10,6 +12,14 @@ By the way, switching to AVR mode in the SNAP debugger is easily accomplished by
 > avrdude -c snap_isp -Pusb -xmode=avr
 ```
 
+### Installation
+
+Install the script with pipx like this:
+
+```
+> pipx install dwgdbserver
+```
+
 ### Usage
 
 If your target board is an Arduino UNO, you have to first modify it by [disconnecting the capacitor](https://debugwire.de/arduino-boards/#requirements-on-the-electrical-characteristics-of-the-reset-line) that is responsible for the auto-reset feature. 
@@ -17,7 +27,7 @@ If your target board is an Arduino UNO, you have to first modify it by [disconne
 Once you have connected one of the above debuggers to a target board, you can start the  gdbserver in a terminal window:
 
 ```
-> dw-gdbserver.py -d atmega328p
+> dw-gdbserver -d atmega328p
 [INFO] Connecting to anything possible
 [INFO] Connected to Atmel-ICE CMSIS-DAP
 [INFO] Starting dw-gdbserver
@@ -55,13 +65,13 @@ Note: automatically using hardware breakpoints for read-only addresses.
 
 ### How to get into and out of debugWIRE mode
 
-When the target chip is not powered by the debugger and is not already in debugWIRE mode,  you must request the switch to debugWIRE mode using the command `monitor debugwire on`. You will then be asked by the Python script to power cycle the target system. Once this is done, the chip will stay in this mode, even after terminating the debugging session. You can switch back to normal by using `monitor debugwire off` before you leave the debugger. 
+When the target chip is not powered by the debugger, and it is not already in debugWIRE mode,  you must request the switch to debugWIRE mode using the command `monitor debugwire on`. You will then be asked by the Python script to power cycle the target system. Once this is done, the chip will stay in this mode, even after terminating the debugging session. You can switch back to normal by using `monitor debugwire off` before you leave the debugger. 
 
 ### What the future has in store for us
 
-The script has all the basic functionality but still needs some polishing. Breakpoint handling and single-stepping will be improved.
+The script has all the basic functionality but still needs some polishing. 
 
-I also plan to have an installable version, and I will provide binaries, which can be used as tools for Arduino IDE 2. And if it all works, it is only a tiny step to generalize it to the JTAG and UPDI AVR MCUs. So, stay tuned.
+I also plan to provide binaries, which can be used as tools for Arduino IDE 2. And if it all works, it is only a tiny step to generalize it to the JTAG and UPDI AVR MCUs. So, stay tuned.
 
 ### List of supported and tested hardware debuggers
 
@@ -76,12 +86,12 @@ Except for [dw-link](https://github.com/felias-fogg/dw-link), this list is copie
 * EDBG - on-board debugger on Xplained Pro/Ultra
 * mEDBG - on-board debugger on Xplained Mini/Nano
 * JTAGICE3 (firmware version 3.0 or newer)
-* **dw-link** - DIY debugWIRE debugger based on Arduino UNO R3
+* **[dw-link](https://github.com/felias-fogg/dw-link)** - DIY debugWIRE debugger running on Arduino UNO R3
 
 
 ### List of supported and tested MCUs
 
-This is the list of all debugWIRE MCUs, which should all be compatible with dw-gdbserver.py. MCUs tested with this Python script are marked bold. MCUs known not to work with the script are struck out. For the list of MCUs compatible with dw-link, you need to consult the [dw-link manual](https://github.com/felias-fogg/dw-link/blob/master/docs/manual.md).
+This is the list of all debugWIRE MCUs, which should all be compatible with dw-gdbserver. MCUs tested with this Python script are marked bold. MCUs known not to work with the script are struck out. For the list of MCUs compatible with dw-link, you need to consult the [dw-link manual](https://github.com/felias-fogg/dw-link/blob/master/docs/manual.md).
 
 #### ATtiny (covered by MicroCore):
 
@@ -107,7 +117,7 @@ This is the list of all debugWIRE MCUs, which should all be compatible with dw-g
 * __ATmega168__, __ATmega168A__, __ATmega168PA__, ATmega168PB, 
 * **ATmega328**, __ATmega328P__, **ATmega328PB**
 
-ATmega48 and ATmega88 (without the A-suffix) suffer from stuck-at-one bits in the program counter and are therefore not debuggable by GDB. 
+The ATmega48 and ATmega88 (without the A-suffix) sitting on my desk suffer from stuck-at-one bits in the program counter and are, therefore, not debuggable by GDB. The test for stuck-at-one-bits is made when connecting to the chips. 
 
 #### Other ATmegas:
 

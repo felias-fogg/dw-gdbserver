@@ -1,0 +1,29 @@
+[project]
+name = "dwgdbserver"
+version = "1.1.2"
+description = "A gdbserver for debugWIRE"
+authors = [
+    {name = "Bernhard Nebel",email = "nebel@arduino-craft-corner.de"}
+]
+license = {text = "MIT"}
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "pymcuprog (>=3.17.3.45,<4.0.0.0)",
+    "pyedbglib (>=2.24.2.18,<3.0.0.0)",
+]
+
+[project.urls]
+repository = "https://github.com/felias-fogg/dw-gdbserver"
+
+[project.scripts]
+dw-gdbserver = 'dwgdbserver.dwgdbserver:main'
+
+[tool.poetry]
+
+[tool.poetry.group.dev.dependencies]
+pylint = "^3.3.4"
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"

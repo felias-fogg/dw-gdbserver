@@ -14,7 +14,7 @@ from pymcuprog.avrdebugger import AvrDebugger
 from pymcuprog.deviceinfo import deviceinfo
 from pymcuprog.nvmupdi import NvmAccessProviderCmsisDapUpdi
 from pymcuprog.nvmdebugwire import NvmAccessProviderCmsisDapDebugwire
-from xnvmdebugwire import XNvmAccessProviderCmsisDapDebugwire
+from dwgdbserver.xnvmdebugwire import XNvmAccessProviderCmsisDapDebugwire
 from pymcuprog.nvmspi import NvmAccessProviderCmsisDapSpi
 from pymcuprog.pymcuprog_errors import PymcuprogToolConfigurationError, PymcuprogNotSupportedError, PymcuprogError
 
@@ -34,7 +34,7 @@ class XAvrDebugger(AvrDebugger):
         # Gather device info
         # moved here so that we have mem + device info even before dw has been started
         try:
-            self.device_info = deviceinfo.getdeviceinfo(device)
+            self.device_info = deviceinfo.getdeviceinfo("dwgdbserver.deviceinfo.devices." + device)
         except ImportError:
             raise PymcuprogNotSupportedError("No device info for device: {}".format(device))
         if self.device_info['interface'].upper() !="UPDI" and \

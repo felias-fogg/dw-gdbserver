@@ -1,6 +1,31 @@
 # Changelog
 
-### V0.9.15
+### V1.1.3 
+
+- Fixed: Crash when stopping with ^C because sendPacket instead of sendSignal was used.
+
+### V1.1.2 (24-Feb-2025)
+
+- Fixed: pyusb worked perfectly under macOS and Linux for enumerating all USB devices, but I got nothing under Windows. So, I removed this package because hidapi is doing all the work anyway.
+
+### V1.1.0 (24-Feb-2025)
+
+- Added: Flash verification
+- Added: `monitor flashverify [on|off]`
+- Changed: `monitor flashcache [on|off]` to `monitor cache [on|off]`
+- Changed requirement for Python to >= 3.9
+
+### V1.0.0 (24-Feb-2025)
+
+- First "offical" version, published on PyPi
+
+### V0.9.16 (24-Feb-2025)
+
+- Added: disabled "run timers when stopped" in warmStart to make sure that this indeed the default.
+- Restructured project structure to make it an installable packet
+- Changed: Version number is now retrieved from importlib.metadata.version
+
+### V0.9.15 (23-FEB-2025)
 
 - Changed: dw-harvest.py moved to deviceinfo/harvest.py
 - Added: collect.py script in deviceinfo, which collects which MCUs are supported and what is the device ID/name mapping.

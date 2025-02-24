@@ -1,7 +1,6 @@
 """
 debugWIRE GDBServer 
 """
-VERSION="0.9.15"
 
 NOSIG   = 0     # no signal
 SIGHUP  = 1     # no connection
@@ -11,6 +10,7 @@ SIGTRAP = 5     # Trace trap  - stopped on a breakpoint
 SIGABRT = 6     # Abort because of a fatal error or no breakpoint available
 
 # args, logging
+import importlib.metadata
 import time
 import sys
 import argparse
@@ -24,12 +24,11 @@ import socket
 import select
 import binascii
 import time
-import usb
 
 from pyedbglib.protocols.avr8protocol import Avr8Protocol 
 from pyedbglib.hidtransport.hidtransportfactory import hid_transport
 import pymcuprog
-from xavrdebugger import XAvrDebugger
+from dwgdbserver.xavrdebugger import XAvrDebugger
 from pymcuprog.backend import Backend
 from pymcuprog.pymcuprog_main import  _clk_as_int # _setup_tool_connection
 from pymcuprog.toolconnection import ToolUsbHidConnection, ToolSerialConnection
@@ -37,10 +36,10 @@ from pymcuprog.nvmspi import NvmAccessProviderCmsisDapSpi
 from pymcuprog.deviceinfo import deviceinfo
 from pymcuprog.utils import read_target_voltage
 from pymcuprog.pymcuprog_errors import PymcuprogToolConfigurationError, PymcuprogNotSupportedError, PymcuprogError
-from deviceinfo.devices.alldevices import dev_id, dev_name
+from dwgdbserver.deviceinfo.devices.alldevices import dev_id, dev_name
 
 # alternative debug server that connects to the dw-link hardware debugger
-import dwlink
+import dwgdbserver.dwlink
 
 class EndOfSession(Exception):
     """Termination of session"""
@@ -578,6 +577,7 @@ class GdbHandler():
         mpgsiz = pgsiz*multbuf
         self.logger.info("Starting to flash ...")
         memtype = self.dbg.device.avr.memtype_write_from_string('flash')
+        verified = set()
         for chunkaddr in sorted(self.flash):
             i = chunkaddr + len(self.flash[chunkaddr][1])
             while i < self.flash[chunkaddr][0]:
@@ -595,6 +595,7 @@ class GdbHandler():
                         currentpage += self.dbg.flash_read(pgaddr+(p*pgsiz), pgsiz)
                 if currentpage == self.flash[chunkaddr][1][pgaddr-chunkaddr:pgaddr-chunkaddr+mpgsiz]:
                     self.logger.debug("Skip flashing page because already flashed at 0x%X", pgaddr)
+                    verified.add(pgaddr)
                 else:
                     self.logger.debug("Flashing from 0x%X to 0x%X", pgaddr, pgaddr+mpgsiz-1)
                     self.dbg.device.avr.write_memory_section(memtype,
@@ -605,6 +606,17 @@ class GdbHandler():
                                                                 allow_blank_skip=False)
                 pgaddr += mpgsiz
         self.logger.info("Flash done")
+        if self.mon.verify:
+            self.logger.info("Verifying ...")
+            for caddr in sorted(self.flash):
+                for pgaddr, pgix in \
+                    zip(range(caddr,self.flash[caddr][0],pgsiz), range(0,self.flash[caddr][0]-caddr,pgsiz)):
+                    if pgaddr in verified:
+                        continue
+                    page = self.dbg.flash_read(pgaddr, pgsiz)
+                    if page != self.flash[caddr][1][pgix:pgix+pgsiz]:
+                        raise FatalError("Flash verification error on page 0x{:X}".format(pgaddr))
+            self.logger.info("Flash verification successful") 
         self.sendPacket("OK")            
 
     def flashEraseHandler(self, packet):
@@ -839,7 +851,7 @@ class GdbHandler():
             elif data[0] == 3: # CTRL-C
                 self.logger.info("Stop")
                 self.dbg.stop()
-                self.sendPacket(SIGINT)
+                self.sendSignal(SIGINT)
                 self.socket.sendall(b"+")
                 self.logger.debug("<- +")
                 data = data[1:]
@@ -1204,14 +1216,16 @@ class MonitorCommand(object):
         self.fastload = True
         self.cache = True
         self.safe = True
+        self.verify = True
         self.timersfreeze = True
         self.old_exec = True
 
         self.moncmds = {
             'breakpoints' : self.monBreakpoints,
+            'cache'       : self.monCache,
             'debugwire'   : self.monDebugwire,
             'Execute'     : self.monExecute,
-            'flashcache'  : self.monFlashCache,
+            'flashverify' : self.monFlashVerify,
             'help'        : self.monHelp,
             'load'        : self.monLoad,
             'noload'      : self.monNoload,
@@ -1269,7 +1283,16 @@ class MonitorCommand(object):
         else:
             return self.monUnknown(token[0])
 
-
+    def monCache(self, tokens):
+        if ("on".startswith(tokens[0]) and len(tokens[0]) > 1) or (tokens[0] == "" and self.cache == True):
+            self.cache = True
+            return("", "Flash memory will be cached")
+        elif ("off".startswith(tokens[0]) and len(tokens[0]) > 1) or (tokens[0] == "" and self.cache == False):
+            self.cache = False
+            return("", "Flash memory will not be cached")
+        else:
+            return self.monUnknown(tokens[0])
+        
     def monDebugwire(self, tokens):
         if "on".startswith(tokens[0]) and len(tokens[0]) > 1:
             if self.dw_deactivated_once:
@@ -1305,30 +1328,31 @@ class MonitorCommand(object):
         else:
             return self.monUnknown(tokens[0])
 
-    def monFlashCache(self, tokens):
-        if ("on".startswith(tokens[0]) and len(tokens[0]) > 1) or (tokens[0] == "" and self.cache == True):
-            self.cache = True
-            return("", "Flash memory will be cached")
-        elif ("off".startswith(tokens[0]) and len(tokens[0]) > 1) or (tokens[0] == "" and self.cache == False):
-            self.cache = False
-            return("", "Flash memory will not be cached")
+    def monFlashVerify(self, tokens):
+        if ("on".startswith(tokens[0]) and len(tokens[0]) > 1) or (tokens[0] == "" and self.verify == True):
+            self.verify = True
+            return("", "Always verifying that load operations are successful")
+        elif ("off".startswith(tokens[0]) and len(tokens[0]) > 1) or (tokens[0] == "" and self.verify == False):
+            self.verify = False
+            return("", "Load operations are not verified")
         else:
             return self.monUnknown(tokens[0])
-        
+
     def monHelp(self, tokens):
         return("", """monitor help                - this help text
-monitor version             - print version
-monitor debugwire [on|off]  - activate/deactivate debugWIRE mode
-monitor reset               - reset MCU
-monitor noload              - execute even when no code has been loaded
+monitor version              - print version
+monitor debugwire [on|off]   - activate/deactivate debugWIRE mode
+monitor reset                - reset MCU
+monitor noload               - execute even when no code has been loaded
 monitor load [readbeforewrite|writeonly]
-                            - optimize loading by first reading flash or not
-monitor flashcache [on|off] - use loaded executable as cache 
-monitor timer [freeze|run]  - freeze/run timers when stopped
+                             - optimize loading by first reading flash or not
+monitor flashverify [on|off] - verify that load & flash was successful
+monitor cache [on|off]       - use loaded executable as cache 
+monitor timer [freeze|run]   - freeze/run timers when stopped
 monitor breakpoints [all|software|hardware]
-                            - allow bps of a certain kind only
+                             - allow breakpoints of a certain kind only
 monitor singlestep [safe|interruptible]
-                            - single stepping mode
+                             - single stepping mode
 The first option is always the default one
 If no parameter is specified, the current setting is returned""")
 
@@ -1376,7 +1400,7 @@ If no parameter is specified, the current setting is returned""")
         return("test", "Now we are running a number of tests on the real target")
 
     def monVersion(self, tokens):
-        return("", "dw-gdbserver {}".format(VERSION))
+        return("", "dw-gdbserver {}".format(importlib.metadata.version("dwgdbserver")))
 
 
 class DebugWIRE(object):
@@ -1409,16 +1433,11 @@ class DebugWIRE(object):
         except FatalError:
             raise
         except Exception as e:
-            self.logger.debug("Graceful exception: %s",e)
             if graceful:
+                self.logger.debug("Graceful exception: %s",e)
                 return False  # we will try to connect later
             else:
                 raise
-        # Now read out program counter and check whether it contains stuck to 1 bits
-        pc = self.dbg.program_counter_read()
-        self.logger.debug("PC=%X",pc)
-        if pc << 1 > self.dbg.memory_info.memory_info_by_name('flash')['size']:
-            raise FatalError("Program counter of MCU has stuck-at-1-bits")
         # Check device signature
         if sig != self.dbg.device_info['device_id']:
             # Some funny special cases of chips pretending to be someone else when in debugWIRE mode
@@ -1426,6 +1445,15 @@ class DebugWIRE(object):
             if sig == 0x1E940B and self.dbg.device_info['device_id'] == 0x1E9406: return # pretends to be a 168P, but is 168
             if sig == 0x1E950F and self.dbg.device_info['device_id'] == 0x1E9514: return # pretends to be a 328P, but is 328
             raise FatalError("Wrong MCU: '{}', expected: '{}'".format(dev_name[sig], dev_name[self.dbg.device_info['device_id']]))
+        # read out program counter and check whether it contains stuck to 1 bits
+        pc = self.dbg.program_counter_read()
+        self.logger.debug("PC=%X",pc)
+        if pc << 1 > self.dbg.memory_info.memory_info_by_name('flash')['size']:
+            raise FatalError("Program counter of MCU has stuck-at-1-bits")
+        # disable running timers while stopped
+        self.dbg.device.avr.protocol.set_byte(Avr8Protocol.AVR8_CTXT_OPTIONS,
+                                                  Avr8Protocol.AVR8_OPT_RUN_TIMERS,
+                                                  0)
         return True
 
     def coldStart(self, graceful=False, callback=None, allow_erase=True):
@@ -1514,8 +1542,8 @@ class DebugWIRE(object):
 
     def enable(self, erase_if_locked=True):
         """
-        Enables debugWIRE mpode by programming theDWEN fuse bit. If the chip is locked,
-        it will be erased. In this case, also the BOOTRST fusebit is disabled.
+        Enables debugWIRE mode by programming theDWEN fuse bit. If the chip is locked,
+        it will be erased. Also the BOOTRST fusebit is disabled.
         Since the implementation of ISP programming is somewhat funny, a few stop/start 
         sequences and double reads are necessary.
         """
@@ -1686,29 +1714,20 @@ def main():
     logging.basicConfig(stream=sys.stderr,level=args.verbose.upper(), format = form)
     logger = getLogger()
 
-    getLogger('pyedbglib.hidtransport.hidtransportbase').setLevel(logging.WARNING) # suppress info messages from hidtransport
-    getLogger('pyedbglib.protocols').setLevel(logging.CRITICAL) # supress spurious error messages from pyedbglib
-    getLogger('pymcuprog.nvm').setLevel(logging.CRITICAL) # suppress errors of not connecting: It is intended!
     if args.verbose.upper() == "DEBUG":
         getLogger('pyedbglib').setLevel(logging.INFO)
     if args.verbose.upper() != "DEBUG":
+        getLogger('pyedbglib.hidtransport.hidtransportbase').setLevel(logging.CRITICAL) # suppress messages from hidtransport
+        getLogger('pyedbglib.protocols').setLevel(logging.CRITICAL) # supress spurious error messages from pyedbglib
+        getLogger('pymcuprog.nvm').setLevel(logging.CRITICAL) # suppress errors of not connecting: It is intended!
         getLogger('pymcuprog.avr8target').setLevel(logging.ERROR) # we do not want to see the "read flash" messages
 
-    
     if args.version:
-        print("dw-gdbserver version {}".format(VERSION))
+        print("dw-gdbserver version {}".format(importlib.metadata.version("dwgdbserver")))
         return 0
 
-    # look for VID/PIDs of possible debuggers
-    usbdevices = usb.core.find(find_all=True, idVendor=0x03EB)
-    nousb = True
-    for device in usbdevices:
-        if device.idVendor == 0x03EB and \
-            device.idProduct in [ 0x2140,  0x2141, 0x2144,  0x2111, 0x216A, 0x2145, 0x2175, 0x2177, 0x2180]:
-            nousb = False
-
-    if args.tool == "dwlink" or (nousb and not args.tool):
-        dwlink.main(args)
+    if args.tool == "dwlink":
+        dwgdbserver.dwlink.main(args)
         return
         
     # Use pymcuprog backend for initial connection here
@@ -1719,7 +1738,7 @@ def main():
     try:
         backend.connect_to_tool(toolconnection)
     except pymcuprog.pymcuprog_errors.PymcuprogToolConnectionError:
-        dwlink.main(args)
+        dwgdbserver.dwlink.main(args)
         return(0)
         
     finally:

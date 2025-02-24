@@ -6,7 +6,7 @@ from pyedbglib.protocols.avr8protocol import Avr8Protocol
 
 from pymcuprog.nvmdebugwire import NvmAccessProviderCmsisDapDebugwire
 from pymcuprog.nvm import NvmAccessProviderCmsisDapAvr
-from xavr8target import XTinyAvrTarget
+from dwgdbserver.xavr8target import XTinyAvrTarget
 from pymcuprog.pymcuprog_errors import PymcuprogError
 
 from pymcuprog.deviceinfo.deviceinfo import DeviceMemoryInfo
