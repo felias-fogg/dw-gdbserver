@@ -8,6 +8,7 @@ import logging
 from logging import getLogger
 from pyedbglib.protocols import housekeepingprotocol
 from pyedbglib.protocols.avr8protocol import Avr8Protocol
+from pyedbglib.protocols.edbgprotocol import EdbgProtocol
 from pyedbglib.util import binary
 
 from pymcuprog.avrdebugger import AvrDebugger
@@ -45,6 +46,8 @@ class XAvrDebugger(AvrDebugger):
         self.memory_info = deviceinfo.DeviceMemoryInfo(self.device_info)
         # ISP interface in order to program DWEN fuse
         self.spidevice = None
+        self.edbg_protocol = EdbgProtocol(transport) # necessary to access target power control
+
 
 
     def setup_session(self, device, frequency=900000, options=""):

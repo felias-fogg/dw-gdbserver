@@ -1,6 +1,10 @@
 # Changelog
 
-### V1.2.0 (24-Feb-2025)
+### V1.3.0 (25-Feb-2025)
+
+- Added: Automatic power-cycling for mEDBG (e.g., Atmega328 XPLAINED)
+
+### V1.2.0 (25-Feb-2025)
 
 - Refactored: Inserting into flash cache and writing pages have been isolated from vFlashWrite and vFlashDone. Now, they can also be used in the  X command.
 - Added: X command can now be used when the GDB client does not support XML.

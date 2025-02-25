@@ -26,6 +26,7 @@ import binascii
 import time
 
 from pyedbglib.protocols.avr8protocol import Avr8Protocol 
+from pyedbglib.protocols.edbgprotocol import EdbgProtocol 
 from pyedbglib.hidtransport.hidtransportfactory import hid_transport
 import pymcuprog
 from dwgdbserver.xavrdebugger import XAvrDebugger
@@ -467,6 +468,10 @@ smap        'D': Detach. All the real housekeeping will take place when the conn
                 self.dbg.device.avr.protocol.set_byte(Avr8Protocol.AVR8_CTXT_OPTIONS,
                                                     Avr8Protocol.AVR8_OPT_RUN_TIMERS,
                                                     response[0])
+            elif 'power' in response[0]:
+                self.dbg.edbg_protocol.set_byte(EdbgProtocol.EDBG_CTXT_CONTROL,
+                                                    EdbgProtocol.EDBG_CONTROL_TARGET_POWER,
+                                                    'on' in response[0])
             if response[0] == 'livetest':
                 from testcases import runtests
                 runtests()
@@ -480,8 +485,24 @@ smap        'D': Detach. All the real housekeeping will take place when the conn
 
 
     def sendPowerCycle(self):
+        if self.dbg.transport.device.product_string.lower().startswith('medbg'):
+            # mEDBG are the only ones it will work with, I believe.
+            # I tried to use a try/except construction,
+            # but this confuses the debugger and it is stuck
+            # in an illegal state (the housekeeper does not respond)
+            self.logger.debug("Try automatic power-cycling")
+            self.dbg.edbg_protocol.set_byte(EdbgProtocol.EDBG_CTXT_CONTROL,
+                                                EdbgProtocol.EDBG_CONTROL_TARGET_POWER,
+                                                0)
+            time.sleep(0.5)
+            self.dbg.edbg_protocol.set_byte(EdbgProtocol.EDBG_CTXT_CONTROL,
+                                                EdbgProtocol.EDBG_CONTROL_TARGET_POWER,
+                                                1)
+            time.sleep(0.1)
+            self.logger.info("Automatic power-cycling successful")
+            return True
         self.sendDebugMessage("*** Please power-cycle the target system ***")
-
+        return False
         
     def supportedHandler(self, packet):
         """
@@ -1265,6 +1286,7 @@ class MonitorCommand(object):
         self.timersfreeze = True
         self.old_exec = True
         self.noxml = False
+        self.power = True
 
         self.moncmds = {
             'breakpoints' : self.monBreakpoints,
@@ -1281,6 +1303,7 @@ class MonitorCommand(object):
             'LiveTests'   : self.monLiveTests,
             'Execute'     : self.monExecute,
             'NoXML'       : self.monNoXML,
+            'Target'      : self.monTarget,
             }
 
     def dispatch(self, tokens):
@@ -1453,6 +1476,17 @@ If no parameter is specified, the current setting is returned""")
         self.noxml = True
         return("", "XML disabled")
 
+    def monTarget(self, tokens):
+        if ("on".startswith(tokens[0]) and len(tokens[0]) > 1) or (tokens[0] == "" and self.power == True):
+            self.power = True
+            return("power on", "Target power enabled")
+        elif ("off".startswith(tokens[0]) and len(tokens[0]) > 1) or (tokens[0] == "" and self.power == False):
+            self.power = False
+            return("power off", "target power disabled")
+        else:
+            return self.monUnknown(tokens[0])
+        
+
 class DebugWIRE(object):
     """
     This class takes care of attaching to and detaching from a debugWIRE target, which is a bit
@@ -1539,6 +1573,8 @@ class DebugWIRE(object):
             magic = callback()
         if magic: # callback has done all the work
             return
+        self.dbg.housekeeper.end_session() # might be necessary after an unsuccessful power-cycle
+        self.dbg.housekeeper.start_session()
         while time.monotonic() - wait_start < 150:
             if (time.monotonic() - last_message > 20):
                 print("*** Please power-cycle the target system ***")

@@ -77,12 +77,12 @@ Except for [dw-link](https://github.com/felias-fogg/dw-link), this list is copie
 
 
 * PKOB nano (nEDBG) - on-board debugger on Curiosity Nano
-* MPLAB PICkit 4 In-Circuit Debugger (when in 'AVR mode')
+* **MPLAB PICkit 4 In-Circuit Debugger** (when in 'AVR mode')
 * **MPLAB Snap In-Circuit Debugger** (when in 'AVR mode')
 * **Atmel-ICE**
 * Power Debugger
 * EDBG - on-board debugger on Xplained Pro/Ultra
-* mEDBG - on-board debugger on Xplained Mini/Nano
+* **mEDBG - on-board debugger on Xplained Mini/Nano**
 * JTAGICE3 (firmware version 3.0 or newer)
 * **[dw-link](https://github.com/felias-fogg/dw-link)** - DIY debugWIRE debugger running on Arduino UNO R3
 
