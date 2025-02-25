@@ -1,5 +1,12 @@
 # Changelog
 
+### V1.2.0 (24-Feb-2025)
+
+- Refactored: Inserting into flash cache and writing pages have been isolated from vFlashWrite and vFlashDone. Now, they can also be used in the  X command.
+- Added: X command can now be used when the GDB client does not support XML.
+
+- Added: A new monitor NoXML command for switching off XML capabilities, meaning that we cannot send a memory map and, therefore, cannot make use of the vFlash RSP commands. This command is just there for testing purposes and no "official" monitor command. It will probably go away to some point.
+
 ### V1.1.2 (24-Feb-2025)
 
 - Fixed: Crash when stopping with ^C because sendPacket instead of sendSignal was used.

@@ -1,7 +1,5 @@
 # dw-gdbserver
 
-*Currently, the gdbserver does not work with all the precompiled debuggers under Windows since they are not compiled with XML support.* 
-
 ### What is it good for?
 
 This Python script acts as a GDB server for [**debugWIRE**](https://debugwire.de) MCUs, such as the ATmega328P. It interfaces with the [dw-link hardware debugger](https://github.com/felias-fogg/dw-link) by providing a serial to TCP/IP bridge. It can also communicate with Microchip debuggers such as [Atmel-ICE](https://www.microchip.com/en-us/development-tool/atatmel-ice) and [MPLAB SNAP](https://www.microchip.com/en-us/development-tool/atatmel-ice) (in AVR mode). In the case of Microchip debuggers, it uses the infrastructure provided by [pymcuprog](https://github.com/microchip-pic-avr-tools/pymcuprog) and [pyedgblib](https://github.com/microchip-pic-avr-tools/pyedbglib) to implement a full-blown GDB server. 

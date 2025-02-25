@@ -65,10 +65,19 @@ class GdbHandler():
         self.bp = BreakAndExec(1, self.mon, avrdebugger, self.readFlashWord)
         self.devicename = devicename
         self.lastSIGVAL = 0
-        self.packet_size = 4000
+        self.packet_size = 8000
         self.extended_remote_mode = False
         self.flash = {} # indexed by the start address, these are pairs [endaddr, data]
-        self.vflashdone = False # set to True after vFlashDone received and will then trigger clearing the flash cache 
+        self.vflashdone = False # set to True after vFlashDone received and will then trigger clearing the flash cache
+        # some device info that is needed throughout
+        self.flash_start = self.dbg.memory_info.memory_info_by_name('flash')['address']
+        self.flash_page_size = self.dbg.memory_info.memory_info_by_name('flash')['page_size']
+        self.flash_size = self.dbg.memory_info.memory_info_by_name('flash')['size']
+        self.multi_buffer = self.dbg.device_info.get('buffers_per_flash_page',1)
+        self.multi_page_size = self.multi_buffer*self.flash_page_size
+        self.sram_start = self.dbg.memory_info.memory_info_by_name('internal_sram')['address']
+        self.sram_size = self.dbg.memory_info.memory_info_by_name('internal_sram')['size']
+
 
         self.packettypes = {
             '!'           : self.extendedRemoteHandler,
@@ -101,7 +110,7 @@ class GdbHandler():
             'vFlashWrite' : self.flashWriteHandler,
             'vKill'       : self.killHandler,
             'vRun'        : self.runHandler,
-          # 'X'           : binary load - not necessary because vFlashWrite is used
+            'X'           : self.binaryLoadHandler,
             'z'           : self.removeBreakpointHandler,
             'Z'           : self.addBreakpointHandler,
             }
@@ -177,7 +186,7 @@ class GdbHandler():
         
     def detachHandler(self, packet):
         """
-        'D': Detach. All the real housekeeping will take place when the connection is terminated
+smap        'D': Detach. All the real housekeeping will take place when the connection is terminated
         """
         self.logger.debug("RSP packet: Detach")
         self.sendPacket("OK")
@@ -295,7 +304,7 @@ class GdbHandler():
                 if chunkaddr <= addr and addr < self.flash[chunkaddr][0]: #right chunk found
                     self.logger.debug("Found relevant chunk: 0x%X", chunkaddr)
                     i = 0
-                    while i < csize and addr < self.flash[chunkaddr][0]:
+                    while i < csize and addr < chunkaddr + len(self.flash[chunkaddr][1]):
                         response.extend(bytes([self.flash[chunkaddr][1][addr-chunkaddr]]))
                         i += 1
                         addr += 1
@@ -320,7 +329,7 @@ class GdbHandler():
 
     def readFlashWord(self, addr):
         """
-        Read one word at an even address from flash (LSB first!).
+        Read one word at an even address from flash (LSB first!) and return it as a word value.
         """
         return(int.from_bytes(self.flashRead(addr, 2), byteorder='little'))
 
@@ -364,6 +373,7 @@ class GdbHandler():
         else:
             # Flash write not supported here
             # This is only done when loading the excutable
+            # and for this X or vFlash packets are used
             # EACCES
             self.logger.error("Illegal memtype in memory write operation: %s", addrSection)
             self.sendPacket("E13")
@@ -484,7 +494,7 @@ class GdbHandler():
         # if we are already in debugWIRE mode, this will work
         # if not, one has to use the 'monitor debugwire on' command later on
         self.mon.dw_mode_active = self.dw.warmStart(graceful=True)
-        self.logger.debug("dw_mode_active=%d",self.mon.dw_mode_active)            
+        self.logger.debug("dw_mode_active=%d",self.mon.dw_mode_active)
         self.sendPacket("PacketSize={0:X};qXfer:memory-map:read+".format(self.packet_size))
 
     def firstThreadInfoHandler(self, packet):
@@ -505,17 +515,13 @@ class GdbHandler():
         """
         'qXfer:memory-map:read' - provide info about memory map so that the vFlash commands are used
         """
-        if ":memory-map:read" in packet: # include registers and IO regs in SRAM area
+        if ":memory-map:read" in packet and not self.mon.noxml: # include registers and IO regs in SRAM area
             self.logger.debug("RSP packet: memory map query")
             memorymap = ('l<memory-map><memory type="ram" start="{0}" length="{1}"/>' + \
                              '<memory type="flash" start="{2}" length="{3}">' + \
                              '<property name="blocksize">{4}</property>' + \
                              '</memory></memory-map>').format(0 + 0x800000, \
-                             (self.dbg.memory_info.memory_info_by_name('internal_sram')['address'] + \
-                              self.dbg.memory_info.memory_info_by_name('internal_sram')['size']), \
-                              self.dbg.memory_info.memory_info_by_name('flash')['address'], \
-                              self.dbg.memory_info.memory_info_by_name('flash')['size'], \
-                              self.dbg.memory_info.memory_info_by_name('flash')['page_size'])
+                             (self.sram_start + self.sram_size), self.flash_start, self.flash_size, self.flash_page_size)
             self.sendPacket(memorymap)
             self.logger.debug("Memory map=%s", memorymap)            
         else:
@@ -572,60 +578,65 @@ class GdbHandler():
         for x,y in zip(sorted(self.flash), sorted(self.flash)[1:]):
             if (self.flash[x][0] > y):
                 self.logger.critical("Chunk starting at 0x%04X overlaps chunk starting at 0x%04X", x, y)
-        pgsiz = self.dbg.memory_info.memory_info_by_name('flash')['page_size']
-        multbuf = self.dbg.device_info.get('buffers_per_flash_page',1)
-        mpgsiz = pgsiz*multbuf
         self.logger.info("Starting to flash ...")
-        memtype = self.dbg.device.avr.memtype_write_from_string('flash')
         verified = set()
         for chunkaddr in sorted(self.flash):
-            i = chunkaddr + len(self.flash[chunkaddr][1])
-            while i < self.flash[chunkaddr][0]:
-                self.flash[chunkaddr][1].append(0xFF)
-                i += 1
-            # now send it page by page
+            self.logger.debug("Flashing chunk starting at 0x%X", chunkaddr)
+            # now send it page by page, perhaps even with incomplete pages
             # if multbuf > 1, then read/write in multbuf batches
-            pgaddr = chunkaddr
-            while pgaddr < self.flash[chunkaddr][0]:
-                self.logger.debug("Flashing page starting at 0x%X", pgaddr)
-                currentpage = bytearray([])
-                if self.mon.fastload:
-                    # interestingly, it is faster to read single pages than a multi-page chunk!
-                    for p in range(multbuf):
-                        currentpage += self.dbg.flash_read(pgaddr+(p*pgsiz), pgsiz)
-                if currentpage == self.flash[chunkaddr][1][pgaddr-chunkaddr:pgaddr-chunkaddr+mpgsiz]:
-                    self.logger.debug("Skip flashing page because already flashed at 0x%X", pgaddr)
-                    verified.add(pgaddr)
-                else:
-                    self.logger.debug("Flashing from 0x%X to 0x%X", pgaddr, pgaddr+mpgsiz-1)
-                    self.dbg.device.avr.write_memory_section(memtype,
-                                                                pgaddr,
-                                                                self.flash[chunkaddr][1][pgaddr-chunkaddr: 
-                                                                                         pgaddr-chunkaddr+mpgsiz],
-                                                                pgsiz,
-                                                                allow_blank_skip=False)
-                pgaddr += mpgsiz
+            self.flashPages(chunkaddr, chunkaddr)
+            self.logger.debug("Chunk done")
         self.logger.info("Flash done")
-        if self.mon.verify:
-            self.logger.info("Verifying ...")
-            for caddr in sorted(self.flash):
-                for pgaddr, pgix in \
-                    zip(range(caddr,self.flash[caddr][0],pgsiz), range(0,self.flash[caddr][0]-caddr,pgsiz)):
-                    if pgaddr in verified:
-                        continue
-                    page = self.dbg.flash_read(pgaddr, pgsiz)
-                    if page != self.flash[caddr][1][pgix:pgix+pgsiz]:
-                        raise FatalError("Flash verification error on page 0x{:X}".format(pgaddr))
-            self.logger.info("Flash verification successful") 
         self.sendPacket("OK")            
 
+    def flashPages(self, chunkaddr, startaddr):
+        """
+        Write to flash memory from the chunk starting at chunkaddr and start at address startaddr
+        """
+        pgsiz = self.flash_page_size
+        multbuf = self.multi_buffer
+        mpgsiz = self.multi_page_size
+        pgaddr = startaddr # should be on (multi-)page boundary!
+        memtype = self.dbg.device.avr.memtype_write_from_string('flash')
+        if pgaddr % mpgsiz != 0:
+            self.logger.critical("Flashing does not start at page boundary")
+        while pgaddr < len(self.flash[chunkaddr][1]) + chunkaddr:
+            self.logger.debug("Flashing page starting at 0x%X", pgaddr)
+            pagetoflash = self.flash[chunkaddr][1][pgaddr-chunkaddr:]
+            if len(pagetoflash) > mpgsiz:
+                pagetoflash = pagetoflash[:mpgsiz]
+            else:
+                self.logger.debug("Incomplete page starting at 0x%X of length %d", pgaddr, len(pagetoflash))
+            currentpage = bytearray([])
+            if self.mon.fastload:
+                # interestingly, it is faster to read single pages than a multi-page chunk!
+                for p in range(multbuf):
+                    currentpage += self.dbg.flash_read(pgaddr+(p*pgsiz), pgsiz)
+            if currentpage[:len(pagetoflash)] == pagetoflash:
+                self.logger.debug("Skip flashing page because already flashed at 0x%X", pgaddr)
+            else:
+                self.logger.debug("Flashing now from 0x%X to 0x%X", pgaddr, pgaddr+len(pagetoflash))
+                pagetoflash += bytearray([0xFF]*(mpgsiz-len(pagetoflash))) # fill up incomplete page
+                self.dbg.device.avr.write_memory_section(memtype,
+                                                            pgaddr,
+                                                            pagetoflash,
+                                                            pgsiz,
+                                                            allow_blank_skip=False)
+                if self.mon.verify:
+                    readbackpage = bytearray([])
+                    for p in range(multbuf):
+                        readbackpage += self.dbg.flash_read(pgaddr+(p*pgsiz), pgsiz)
+                    if readbackpage != pagetoflash:
+                        raise FatalError("Flash verification error on page 0x{:X}".format(pgaddr))
+            pgaddr += mpgsiz
+    
+        
     def flashEraseHandler(self, packet):
         """
         'vFlashErase': we use the information in this command 
          to prepare a buffer for the program we need to flash;
          in case of multi page buffers, we correct start and end address
         """
-
         self.logger.debug("RSP packet: flash erase")
         if self.vflashdone:
             self.vflashdone = False
@@ -636,8 +647,8 @@ class GdbHandler():
             addrstr, sizestr = packet[1:].split(',')
             beg_addr = int(addrstr, 16)
             end_addr = beg_addr + int(sizestr, 16)
-            pgsiz = self.dbg.memory_info.memory_info_by_name('flash')['page_size']
-            multbuf = self.dbg.device_info.get('buffers_per_flash_page',1)
+            pgsiz = self.flash_page_size
+            multbuf = self.multi_buffer
             mpgsiz = pgsiz*multbuf
             beg_addr = (beg_addr//mpgsiz)*mpgsiz
             end_addr = ((end_addr+mpgsiz-1)//mpgsiz)*mpgsiz
@@ -655,7 +666,19 @@ class GdbHandler():
         data = self.unescape(packet[len(addrstr)+2:])
         addr = int(addrstr, 16)
         self.logger.debug("RSP packet: flash write starting at 0x%04X", addr)
-        #find right chunk
+        #insert new block in flash cache
+        if self.insertNewBlock(addr, data):
+            self.sendPacket("OK")
+        else:
+            self.sendPacket("E03")
+
+    def insertNewBlock(self, addr, data):
+        """
+        Insert a new block of memory into the 'flash cache'
+        Returns either True (when everything OK) or False, when chunk has not been found or
+        there is an overlap. The latter two things can only happen with vFlash.  
+        """
+        self.logger.debug("Insert new block into flash cache at 0x%X of length %d", addr, len(data))
         for chunkaddr in self.flash:
             if chunkaddr <= addr and addr < self.flash[chunkaddr][0]: # right chunk found
                 i = chunkaddr + len(self.flash[chunkaddr][1])
@@ -666,12 +689,11 @@ class GdbHandler():
                 if len(self.flash[chunkaddr][1]) + chunkaddr > self.flash[chunkaddr][0]: # should not happen
                     self.logger.error("Address for data 0x%X larger than addr 0x%X in packet vFlashWrite: 0x%X",
                                           len(self.flash[chunkaddr][1]) + chunkaddr, self.flash[chunkaddr][0], addr)
-                    self.sendPacket("E03")
+                    return False
                 else:
-                    self.sendPacket("OK")
-                return
+                    return True
         self.logger.error("No previous vFlashErase packet for vFlashWrite at: 0x%X", addr)
-        self.sendPacket("E03")
+        return False
 
     def escape(self, data):
         """
@@ -737,6 +759,29 @@ class GdbHandler():
         self.logger.debug("Resetting CPU and wait for start")
         self.dbg.reset()
         self.sendSignal(SIGTRAP)
+
+    def binaryLoadHandler(self, packet):
+        """
+        'X': Binary load
+        We assume that if data does not start at page boundary, there is 
+        data already there to use it for completing the page at its beginning.
+        Pages incomplete at the end are filled with 0xFF (in the flashPages method)
+        """
+        addr = int((packet.split(b',')[0]).decode('ascii'),16)
+        length = int(((packet.split(b',')[1]).split(b':')[0]).decode('ascii'),16)
+        data = self.unescape((packet.split(b':')[1]))
+        self.logger.debug("RSP packet: X, addr=0x%X, length=%d", addr, length)
+        # if flash is empty or if we try to write to an already filled address, the flash cache is initialized
+        if not self.flash or len(self.flash[0][1]) > addr:
+            self.logger.debug("Flash cache initialized")
+            self.flash = {0 : [self.flash_size, bytearray()]} # just one chunk from start to end
+        self.insertNewBlock(addr, data) # chunk not found error and writing over end of chunk is not possible here
+        if addr % self.multi_page_size != 0: # address is not on page boundary
+            self.logger.debug("Page at 0x%X does not start at page boundary, will be adjusted to: 0x%X",
+                                  addr, addr - (addr % self.multi_page_size))
+            addr -= (addr % self.multi_page_size)
+        self.flashPages(0, addr)
+        self.sendPacket("OK")
 
     def removeBreakpointHandler(self, packet):
         """
@@ -1219,12 +1264,12 @@ class MonitorCommand(object):
         self.verify = True
         self.timersfreeze = True
         self.old_exec = True
+        self.noxml = False
 
         self.moncmds = {
             'breakpoints' : self.monBreakpoints,
             'cache'       : self.monCache,
             'debugwire'   : self.monDebugwire,
-            'Execute'     : self.monExecute,
             'flashverify' : self.monFlashVerify,
             'help'        : self.monHelp,
             'load'        : self.monLoad,
@@ -1234,6 +1279,8 @@ class MonitorCommand(object):
             'timer'       : self.monTimer,
             'version'     : self.monVersion,
             'LiveTests'   : self.monLiveTests,
+            'Execute'     : self.monExecute,
+            'NoXML'       : self.monNoXML,
             }
 
     def dispatch(self, tokens):
@@ -1318,16 +1365,6 @@ class MonitorCommand(object):
         else:
             return self.monUnknown(token[0])
 
-    def monExecute(self,tokens):
-        if ("old".startswith(tokens[0])) or (tokens[0] == "" and self.old_exec == True):
-            self.old_exec = True
-            return("", "Old form of execution is used")
-        elif ("new".startswith(tokens[0])) or (tokens[0] == "" and self.old_exec == False):
-            self.old_exec = False
-            return("", "New form of execution is used")
-        else:
-            return self.monUnknown(tokens[0])
-
     def monFlashVerify(self, tokens):
         if ("on".startswith(tokens[0]) and len(tokens[0]) > 1) or (tokens[0] == "" and self.verify == True):
             self.verify = True
@@ -1396,12 +1433,25 @@ If no parameter is specified, the current setting is returned""")
         else:
             return self.monUnknown(tokens[0])
 
-    def monLiveTests(self, tokens):
-        return("test", "Now we are running a number of tests on the real target")
-
     def monVersion(self, tokens):
         return("", "dw-gdbserver {}".format(importlib.metadata.version("dwgdbserver")))
 
+    def monLiveTests(self, tokens):
+        return("test", "Now we are running a number of tests on the real target")
+
+    def monExecute(self, tokens):
+        if ("old".startswith(tokens[0])) or (tokens[0] == "" and self.old_exec == True):
+            self.old_exec = True
+            return("", "Old form of execution is used")
+        elif ("new".startswith(tokens[0])) or (tokens[0] == "" and self.old_exec == False):
+            self.old_exec = False
+            return("", "New form of execution is used")
+        else:
+            return self.monUnknown(tokens[0])
+
+    def monNoXML(self, tokens):
+        self.noxml = True
+        return("", "XML disabled")
 
 class DebugWIRE(object):
     """
@@ -1609,7 +1659,7 @@ class AvrGdbRspServer(object):
         while True:
             ready = select.select([self.connection], [], [], 0.5)
             if ready[0]:
-                data = self.connection.recv(4096)
+                data = self.connection.recv(8192)
                 if len(data) > 0:
                     # self.logger.debug("Received over TCP/IP: %s",data)
                     self.handler.handleData(data)
