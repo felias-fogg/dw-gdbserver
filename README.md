@@ -2,13 +2,15 @@
 
 ### What is it good for?
 
-This Python script acts as a GDB server for [**debugWIRE**](https://debugwire.de) MCUs, such as the ATmega328P. It interfaces with the [dw-link hardware debugger](https://github.com/felias-fogg/dw-link) by providing a serial to TCP/IP bridge. It can also communicate with Microchip debuggers such as [Atmel-ICE](https://www.microchip.com/en-us/development-tool/atatmel-ice) and [MPLAB SNAP](https://www.microchip.com/en-us/development-tool/atatmel-ice) (in AVR mode). In the case of Microchip debuggers, it uses the infrastructure provided by [pymcuprog](https://github.com/microchip-pic-avr-tools/pymcuprog) and [pyedgblib](https://github.com/microchip-pic-avr-tools/pyedbglib) to implement a full-blown GDB server. 
+This Python script acts as a GDB server for [**debugWIRE**](https://debugwire.de) MCUs, such as the ATmega328P.  It can communicate with Microchip debuggers such as [Atmel-ICE](https://www.microchip.com/en-us/development-tool/atatmel-ice) and [MPLAB SNAP](https://www.microchip.com/en-us/development-tool/atatmel-ice) (in AVR mode), and it provides a pass-through service for the DIY hardware debugger [dw-link](https://github.com/felias-fogg/dw-link). For Microchip debuggers, it uses the infrastructure provided by [pymcuprog](https://github.com/microchip-pic-avr-tools/pymcuprog) and [pyedgblib](https://github.com/microchip-pic-avr-tools/pyedbglib) to implement a full-blown GDB server. 
 
 By the way, switching to AVR mode in the SNAP debugger is easily accomplished by using avrdude (>= Version 7.3):
 
 ```
 > avrdude -c snap_isp -Pusb -xmode=avr
 ```
+
+With PICkit4 it is similar. When you repeat this command, and you get the message again that the debugger is in 'PIC' mode, you need to flash new firmware first using MPLAB X.
 
 ### Installation
 
@@ -20,9 +22,9 @@ Install the script with pipx like this:
 
 ### Usage
 
-If your target board is an Arduino UNO, you have to first modify it by [disconnecting the capacitor](https://debugwire.de/arduino-boards/#requirements-on-the-electrical-characteristics-of-the-reset-line) that is responsible for the auto-reset feature. 
+If your target board is an Arduino board, you most probably have to first modify it by [disconnecting the capacitor](https://debugwire.de/arduino-boards/#requirements-on-the-electrical-characteristics-of-the-reset-line) that is responsible for the auto-reset feature. 
 
-Once you have connected one of the above debuggers to a target board, you can start the  gdbserver in a terminal window:
+Once you have connected an appropriate hardware debugger to your target board, you can start the  gdbserver in a terminal window:
 
 ```
 > dw-gdbserver -d atmega328p
@@ -46,7 +48,7 @@ Remote debugging using :2000
 0x00000000 in __vectors ()
 (gdb) monitor debugwire
 debugWIRE mode is disabled
-(gdb) monitor debugwire on
+(gdb) monitor debugwire enable
 *** Please power-cycle the target system ***
 Ignoring packet error, continuing...
 debugWIRE mode is enabled
@@ -61,15 +63,43 @@ Note: automatically using hardware breakpoints for read-only addresses.
 ...
 ```
 
+### Command line options
+
+| Optionname           | Descripion                                                   |
+| -------------------- | ------------------------------------------------------------ |
+| `--device` <br>`-d`  | The argument to this option specifies the MCU type of the target chip in lower case.  This option is mandatory. If a '?' mark is given, all supported MCUs are listed. |
+| `--gede`<br>`-g`     | No argument for this option. This option will start the `Gede` debugger GUI. |
+| `--port` <br>`-p`    | IP port on the local host to which GDB can connect.          |
+| `--start` <br>`-s`   | Program to start or the string `noop`, when no program should be started |
+| `--tool`<br>`-t`     | Specifying the debug tool. Possible values are `atmelice`, `edbg`, `jtagice3`, `medbg`, `nedbg`, `pickit4`, `powerdebugger`, `snap`, `dwlink`. Use of this option is helpful only if more than one debugging tool is connected to the computer. |
+| `--usbsn` <br>`-u`   | USB serial number of the tool. This is only necessary if one has multiple debugging tools connected to the computer. |
+| `--verbose` <br>`-v` | Specify verbosity level. Possible values are `debug`, `info`, `warning`, `error`, or `critical`. |
+| `--version` <br>`-V` | Print dw-gdbserver version number and exit.                  |
+
+
+
 ### How to get into and out of debugWIRE mode
 
-When the target chip is not powered by the debugger, and it is not already in debugWIRE mode,  you must request the switch to debugWIRE mode using the command `monitor debugwire on`. You will then be asked by the Python script to power cycle the target system. Once this is done, the chip will stay in this mode, even after terminating the debugging session. You can switch back to normal by using `monitor debugwire off` before you leave the debugger. 
+When the MCU is not already in debugWIRE mode,  you must request the switch to debugWIRE mode using the command `monitor debugwire enable` in GDB. The debugger will then enable the DWEN fuse and either power-cycles the target by itself (if possible) or ask you to power-cycle the target system. Once this is done, the chip will stay in debugWIRE mode, even after terminating the debugging session. In other words, when starting the next debug session, the MCU is already in debugWIRE mode. You can switch back to normal mode using the command `monitor debugwire disable` before leaving the debugger. 
 
-### What the future has in store for us
+### Monitor commands
 
-The script has all the basic functionality but still needs some polishing. 
+In addition to the above mentioned command for enabling debugWIRE mode, there are a few other `monitor` commands.
 
-I also plan to provide binaries, which can be used as tools for Arduino IDE 2. And if it all works, it is only a tiny step to generalize it to the JTAG and UPDI AVR MCUs. So, stay tuned.
+| Command                                               | Action                                                       |
+| ----------------------------------------------------- | ------------------------------------------------------------ |
+| `monitor breakpoints` [`all`\|`software`\|`hardware`] | Restricts the kind of breakpoints the hardware debugger can use. Either *all* types are permitted, only *software* breakpoints are allowed, or only *hardware* breakpoints can be used. Using all kinds is the default. |
+| `monitor caching` [`enable`\|`disable`]               | The loaded executable is used as a cache in the gdbserver when *enabled*, which is the default. |
+| `monitor debugwire` [`enable`\|`disable`]             | DebugWIRE mode will be enabled or disabled. When enabling it, you may be asked to power-cycle the target. After disabling debugWIRE mode, the MCU can be programmed again using ISP programming. |
+| `monitor load` [`readbeforewrite`\|`writeonly`]       | When loading an executable, either each flash page is compared with the content to be loaded, and flashing is skipped if the content is already there, or each flash page is written without reading the current contents beforehand. The first option is the default option and there is no reason to change it. |
+| `monitor onlyloaded` [`enable`\|`disable`]            | Execution is only possible when a `load` command was previously executed, which is the default. If you want to start execution without previously loading an executable, you need to disable this mode. |
+| `monitor reset`                                       | Resets the MCU.                                              |
+| `monitor singlestep` [`safe`\|`interruptible`]        | Single-stepping can either be performed in a *safe* way, where single steps are shielded against interrupts or in the default way, where a single step can lead to a jump into the interrupt dispatch table. The *safe* option is the default. |
+| `monitor timer` [`freeze`\|`run`]                     | Timers can either be *frozen* when execution is stopped, or they can *run* freely. The later option is helpful when PWM output is crucial. |
+| `monitor verify` [`enable`\|`disable`]                | Verify flash after loading each flash page. The cost for verifying is negligible, and doing so might diagnose flash wear problems. The default is that this option is *enabled*. |
+| `monitor version`                                     | Show version of the gdbserver.                               |
+
+The default setting is always the first one listed, except for `debugwire`, where it depends on the MCU itself. All commands can, as usual, be abbreviated. For example, `mo d e` is equivalent to `monitor debugwire enable`. 
 
 ### List of supported and tested hardware debuggers
 
@@ -115,7 +145,7 @@ This is the list of all debugWIRE MCUs, which should all be compatible with dw-g
 * __ATmega168__, __ATmega168A__, __ATmega168PA__, ATmega168PB, 
 * **ATmega328**, __ATmega328P__, **ATmega328PB**
 
-The ATmega48 and ATmega88 (without the A-suffix) sitting on my desk suffer from stuck-at-one bits in the program counter and are, therefore, not debuggable by GDB. The test for stuck-at-one-bits is made when connecting to the chips. 
+The ATmega48 and ATmega88 (without the A-suffix) sitting on my desk suffer from stuck-at-one bits in the program counter and are, therefore, not debuggable by GDB. I suspect that this applies to all chips labelled this way. In any case, the test for stuck-at-one-bits is made when connecting to the chips. 
 
 #### Other ATmegas:
 
@@ -171,3 +201,10 @@ It may also be necessary to grant read+write permission to the port, for example
 ```bash
 sudo chmod a+rw /dev/ttyACM0
 ```
+
+### What the future has in store for us
+
+The script has all the basic functionality but still needs some polishing. 
+
+I also plan to provide binaries, which can be used as tools for the Arduino IDE 2. And if it all works, it is only a tiny step to generalize it to the JTAG and UPDI AVR MCUs. So, stay tuned.
+

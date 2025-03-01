@@ -100,6 +100,8 @@ class XNvmAccessProviderCmsisDapDebugwire(NvmAccessProviderCmsisDapDebugwire):
         :param offset: relative offset within the memory type
         :param data: the data to program
         """
+        if len(data) == 0:
+            return
         memtype_string = memory_info[DeviceMemoryInfoKeys.NAME]
         memtype = self.avr.memtype_read_from_string(memtype_string)
         if memtype == 0:

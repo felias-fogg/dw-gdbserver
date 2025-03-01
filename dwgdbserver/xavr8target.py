@@ -121,7 +121,6 @@ class XTinyAvrTarget(TinyAvrTarget):
             chunk = data_to_write[0:write_chunk_size]
             self.logger.debug("memtype: %s", memory_type)
             self.logger.debug("start_addr: 0x%X", start_address)
-            self.logger.debug("Chunk to write: %s",  [chunk.hex()[i:i+2] for i in range(0, len(chunk.hex()), 2)])
             if not self.skip_blank_pages or not self.is_blank(chunk) or not allow_blank_skip:
                 self.protocol.memory_write(memory_type, start_address, chunk)
             start_address += write_chunk_size

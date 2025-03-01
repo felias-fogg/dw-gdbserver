@@ -62206,4 +62206,5 @@ instrmap = {
 0xfff5 : ('sbrs', 1, 'cond'),
 0xfff6 : ('sbrs', 1, 'cond'),
 0xfff7 : ('sbrs', 1, 'cond'),
+0x9598 : ('break', 1, 'nobranch')
 }
