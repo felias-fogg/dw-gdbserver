@@ -1,6 +1,11 @@
 # Changelog
 
-### V2.0.0-pre1
+V2.0.0-pre2 (2-Mar-2025)
+
+- Changed: Refactored memory access. It has now its own class.
+- Changed: All accesses to auxiliary classes are now through methods so that I can use auto-speccing.
+
+### V2.0.0-pre1 (1-Mar-2025)
 
 - Changed: Some monitor commands have been renamed or the options have changed. That is the reason for bumping the major version number.
 - Added: The --device command line option now accepts '?' and will in response provide the list of supported MCUs.

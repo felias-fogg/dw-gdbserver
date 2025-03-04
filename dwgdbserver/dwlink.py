@@ -1,5 +1,6 @@
 # Discover dw-link and then redirect data from a TCP/IP connection to the serial port and vice versa.
-# Based on Chris Liechti's tcp_serial_redirct script
+# Further, send the device name in specially designed RSP record and wait for Ack
+# Based on Chris Liechti's tcp_serial_redirect script
 #
 import sys
 import socket
@@ -55,7 +56,7 @@ def discover(args):
             if args.verbose == "debug":
                 sys.stdout.write("Device: {}\n".format(s.device))
                 sys.stdout.flush()
-            if s.device == "/dev/cu.Bluetooth-Incoming-Port":
+            if s.device in ["/dev/cu.Bluetooth-Incoming-Port", "/dev/cu.debug-console"]:
                 continue
             if args.verbose == "debug":
                 sys.stdout.write("Check:{}\n".format(s.device))
