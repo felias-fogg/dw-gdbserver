@@ -1,6 +1,12 @@
 # Changelog
 
-V2.0.0-pre2 (2-Mar-2025)
+### V2.0.0-pre3 (6-Mar-2025)
+
+- Added: Tests for GdbHandler, Memory, and BreakAndExec
+- Changed: Simplified flash cache management. We only have one consecutive address space (not the potentially many caused by different vFlashErase statements)
+- Changed: By now, the new execution code is the standard (`_old_exec == False`)
+
+### V2.0.0-pre2 (2-Mar-2025)
 
 - Changed: Refactored memory access. It has now its own class.
 - Changed: All accesses to auxiliary classes are now through methods so that I can use auto-speccing.

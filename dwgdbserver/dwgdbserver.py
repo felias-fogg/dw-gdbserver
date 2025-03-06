@@ -155,24 +155,19 @@ class GdbHandler():
         self.logger.debug("RSP packet: Continue")
         if not self.mon.is_dw_mode_active():
             self.logger.debug("Cannot start execution because not connected")
-            self.sendDebugMessage("Enable debugWIRE first: 'monitor debugwire on'")
+            self.sendDebugMessage("Enable debugWIRE first: 'monitor debugwire enable'")
             self.sendSignal(SIGHUP)
             return
-        if self.mem.is_flash_empty() and not self.mon.is_noload():
+        if self.mem.isFlashEmpty() and not self.mon.is_noload():
             self.logger.debug("Cannot start execution without prior load")
             self.sendDebugMessage("Load executable first before starting execution")
             self.sendSignal(SIGILL)
             return
+        newpc = None
         if packet:
             newpc = int(packet,16)
-        else:
-            newpc = self.dbg.program_counter_read()<<1
-        self.logger.debug("Resume execution at 0x%X", newpc)
-        if self.mon.is_old_exec():
-            self.dbg.program_counter_write(newpc>>1)
-            self.dbg.run()
-        else: 
-            self.bp.resumeExecution(newpc)
+            self.logger.debug("Set PC to 0x%X before resuming execution", newpc)
+        self.bp.resumeExecution(newpc)
 
     def continueWithSignalHandler(self, packet):
         """
@@ -457,23 +452,16 @@ class GdbHandler():
             self.sendDebugMessage("Enable debugWIRE first: 'monitor debugwire on'")
             self.sendSignal(SIGHUP)
             return
-        if self.mem.is_flash_empty() and not self.mon.is_noload():
+        if self.mem.isFlashEmpty() and not self.mon.is_noload():
             self.logger.debug("Cannot single-step without prior load")
             self.sendDebugMessage("Load executable first before starting execution")
             self.sendSignal(SIGILL)
             return
+        newpc = None
         if packet:
             newpc = int(packet,16)
-            self.logger.debug("Set PC to 0x%s",newpc)
-        else:
-            newpc = self.dbg.program_counter_read()<<1
-        self.logger.debug("Single-step at 0x%X", newpc)
-        if self.mon.is_old_exec():
-            self.dbg.program_counter_write(newpc>>1)
-            self.dbg.step()
-            self.sendSignal(SIGTRAP)
-        else:
-            self.sendSignal(self.bp.singleStep(newpc))
+            self.logger.debug("Set PC to 0x%s before single step",newpc)
+        self.sendSignal(self.bp.singleStep(newpc))
 
     def stepWithSignalHandler(self, packet):
         """
@@ -492,53 +480,44 @@ class GdbHandler():
         """
         'vFlashDone': everything is there, now we can start flashing! 
         """
-        self.logger.debug("RSP packet: flash done")
+        self.logger.debug("RSP packet: vFlashDone")
         self.vflashdone = True
         self.logger.info("Starting to flash ...")
-        self.mem.check_chunk_overlap()
-        for chunkaddr in self.mem.listOfChunks():
-            self.logger.debug("Flashing chunk starting at 0x%X", chunkaddr)
-            # now send it page by page, perhaps even with incomplete pages
-            # if multbuf > 1, then read/write in multbuf batches
-            self.mem.flashPages(chunkaddr, chunkaddr)
-            self.logger.debug("Chunk done")
+        self.mem.flashPages()
         self.logger.info("Flash done")
         self.sendPacket("OK")            
         
     def flashEraseHandler(self, packet):
         """
-        'vFlashErase': we use the information in this command 
-         to prepare a buffer for the program we need to flash;
-         in case of multi page buffers, we correct start and end address
+        'vFlashErase': Since we cannot and need not to erase pages,
+        we only use this command to clear the cache when there was a previous
+        vFlashDone command.
         """
-        self.logger.debug("RSP packet: flash erase")
+        self.logger.debug("RSP packet: vFlashErase")
         if self.vflashdone:
             self.vflashdone = False
-            self.mem.initFlash() # clear flash 
+            self.mem.initFlash() # clear cache
         if self.mon.is_dw_mode_active():
-            if self.mem.is_flash_empty():
+            if self.mem.isFlashEmpty():
                 self.logger.info("Loading executable ...")
-            addrstr, sizestr = packet[1:].split(',')
-            self.mem.insertNewChunk(int(addrstr,16), int(sizestr,16))
             self.sendPacket("OK")
         else:
             self.sendPacket("E01")
             
     def flashWriteHandler(self, packet):
         """
-        'vFlashWrite': chunks of the program we need to flash
+        'vFlashWrite': chunks of the program data we need to flash
         """
         addrstr = (packet.split(b':')[1]).decode('ascii')
         data = self.unescape(packet[len(addrstr)+2:])
         addr = int(addrstr, 16)
-        self.logger.debug("RSP packet: flash write starting at 0x%04X", addr)
+        self.logger.debug("RSP packet: vFlashWrite starting at 0x%04X", addr)
         #insert new block in flash cache
-        if self.mem.insertNewBlock(addr, data):
-            self.sendPacket("OK")
-        else:
-            self.sendPacket("E03")
+        self.mem.storeToCache(addr, data)
+        self.sendPacket("OK")
 
-    def escape(self, data):
+    @staticmethod
+    def escape(data):
         """
         Escape binary data to be sent to Gdb.
 
@@ -554,7 +533,8 @@ class GdbHandler():
                 result.append(c)
         return bytes(result)
 
-    def unescape(self, data):
+    @staticmethod
+    def unescape(data):
         """
         De-escapes binary data from Gdb.
         
@@ -578,12 +558,13 @@ class GdbHandler():
     def killHandler(self, packet):
         """
         'vKill': Kill command. Will be called, when the user requests a 'kill', but also 
-        when in extended-remote mode, a 'run' is issued. In ordinary remote mode, it
+        when in extended-remote mode, when a 'run' is issued. In ordinary remote mode, it
         will disconnect, in extended-remote it will not, and you can restart or load a modified 
         file and run that one.
         """
         self.logger.debug("RSP packet: kill process, will reset CPU")
-        self.dbg.reset()
+        if self.mon.is_dw_mode_active():
+            self.dbg.reset()
         self.sendPacket("OK")
         if not self.extended_remote_mode:
             self.logger.debug("Terminating session ...")
@@ -633,10 +614,7 @@ class GdbHandler():
         addr = packet.split(",")[1]
         self.logger.debug("RSP packet: remove BP of type %s at %s", breakpoint_type, addr)
         if breakpoint_type == "0" or breakpoint_type == "1":
-            if self.mon.is_old_exec():
-                self.dbg.software_breakpoint_clear(int(addr, 16))
-            else:
-                self.bp.removeBreakpoint(int(addr, 16))
+            self.bp.removeBreakpoint(int(addr, 16))
             self.sendPacket("OK")
         else:
             self.logger.debug("Breakpoint type %s not supported", breakpoint_type)
@@ -654,10 +632,6 @@ class GdbHandler():
         self.logger.debug("RSP packet: set BP of type %s at %s", breakpoint_type, addr)
         length = packet.split(",")[2]
         if breakpoint_type == "0" or breakpoint_type == "1":
-            if self.mon.is_old_exec():
-                self.dbg.software_breakpoint_set(int(addr, 16))
-                self.sendPacket("OK")
-                return
             if self.bp.insertBreakpoint(int(addr, 16)):
                 self.sendPacket("OK")
             else:
@@ -690,8 +664,6 @@ class GdbHandler():
         """
         checksum = sum(packetData.encode("ascii")) % 256
         message = "$" + packetData + "#" + format(checksum, '02x')
-        if packetData == "":
-            message = "$#00"
         self.logger.debug("<- %s", message)
         self.lastmessage = packetData
         self.socket.sendall(message.encode("ascii"))
@@ -704,7 +676,8 @@ class GdbHandler():
 
     def sendDebugMessage(self, mes):
         """
-        Send a packet that always should be displayed in the debug console
+        Send a packet that always should be displayed in the debug console when the system
+        is in active mode.
         """
         self.sendPacket('O' + binascii.hexlify(bytearray((mes+"\n").encode('utf-8'))).decode("ascii").upper())
     
@@ -785,25 +758,49 @@ class Memory(object):
     This class is responsible for access to all kinds of memory, for loading the flash memory, 
     and for managing the flash cache.
 
-
+    Flash cache is implemented as a growing bytearray. We start always at 0x0000 and fill empty
+    spaces by 0xFF. _flashmem_start_prog points always to the first adddress from which we need to 
+    programm flash memory. Neither the end of the flash cache nor _flashmem_start_prog need to be 
+    aligned with multi_page_size (page_size multiplied by buffers_per_flash_page).
+    When programming, we will restart at a lower adderess or add 0xFF at the end. 
     """
 
     def __init__(self, dbg, mon):
         self.logger = getLogger('Memory')
         self.dbg = dbg
         self.mon = mon
-        self._flash = {} # indexed by the start address, these are pairs [endaddr, data]
+        self._flash = list() # array starting at 0x0000
         # some device info that is needed throughout
         self._flash_start = self.dbg.memory_info.memory_info_by_name('flash')['address']
         self._flash_page_size = self.dbg.memory_info.memory_info_by_name('flash')['page_size']
         self._flash_size = self.dbg.memory_info.memory_info_by_name('flash')['size']
+        self._flashmemtype = self.dbg.device.avr.memtype_write_from_string('flash')
         self._multi_buffer = self.dbg.device_info.get('buffers_per_flash_page',1)
         self._multi_page_size = self._multi_buffer*self._flash_page_size
         self._sram_start = self.dbg.memory_info.memory_info_by_name('internal_sram')['address']
         self._sram_size = self.dbg.memory_info.memory_info_by_name('internal_sram')['size']
         self._eeprom_start = self.dbg.memory_info.memory_info_by_name('eeprom')['address']
         self._eeprom_size = self.dbg.memory_info.memory_info_by_name('eeprom')['size']
+        self._flashmem_start_prog = 0
 
+    def initFlash(self):
+        """
+        Initialize flash by emptying it.
+        """
+        self._flash = []
+        self._flashmem_start_prog = 0
+
+    def isFlashEmpty(self):
+        """
+        Return true if flash cache is empty.
+        """
+        return len(self._flash) == 0
+
+    def flashFilled(self):
+        """
+        Return how many bytes have already be filled.
+        """
+        return len(self._flash)
 
     def readmem(self, addr, size):
         """
@@ -857,39 +854,22 @@ class Memory(object):
         Read flash contents from cache that had been constructed during loading the file.
         It is faster and circumvents the problem that with some debuggers only page-sized
         access is possible. If there is nothing in the cache or it is explicitly disallowed, 
-        fall back to reading the flash page-wise.
+        fall back to reading the flash page-wise (which is the only way supported by mEDBG).
         """
-        caddr = addr
-        self.logger.debug("Trying to read %d bytes starting at 0x%X", size, caddr)
+        self.logger.debug("Trying to read %d bytes starting at 0x%X", size, addr)
         if not self.mon.is_dw_mode_active():
             self.logger.error("Cannot read from memory when DW mode is disabled")
-            return bytearray(size)
-        if self.mon.is_cache():
-            response = bytearray()
-            csize = size
-            for chunkaddr in sorted(self._flash):
-                if chunkaddr <= caddr and caddr < self._flash[chunkaddr][0]: #right chunk found
-                    self.logger.debug("Found relevant chunk: 0x%X", chunkaddr)
-                    i = 0
-                    while i < csize and caddr < chunkaddr + len(self._flash[chunkaddr][1]):
-                        response.extend(bytes([self._flash[chunkaddr][1][caddr-chunkaddr]]))
-                        i += 1
-                        caddr += 1
-                    if i < csize: # we reached end of chunk early, there must be another one!
-                        csize -= i
-                        continue
-                    else:
-                        return(response)
-        # if there is not enough data in the cache, we read full pages from memory. This should
-        # work even in case of the mEDBG debugger.
-        pgsiz = self._flash_page_size
-        baseaddr = (addr//pgsiz)*pgsiz
-        endaddr = addr+size
-        pnum = ((endaddr - baseaddr) + pgsiz - 1) // pgsiz
+            return bytearray([0xFF]*size)
+        if self.mon.is_cache() and addr + size <= self.flashFilled():
+            return self._flash[addr:addr+size]
+        baseaddr = (addr // self._flash_page_size) * self._flash_page_size
+        endaddr = addr + size
+        pnum = ((endaddr - baseaddr) +  self._flash_page_size - 1) // self._flash_page_size
         self.logger.debug("No cache, request %d pages starting at 0x%X", pnum, baseaddr)
         response = bytearray()        
         for p in range(pnum):
-            response +=  self.dbg._flash_read(baseaddr+(p*pgsiz), pgsiz)
+            response +=  self.dbg.flash_read(baseaddr + (p * self._flash_page_size),
+                                                  self._flash_page_size)
         self.logger.debug("Response from page read: %s", response)
         response = response[addr-baseaddr:addr-baseaddr+size]
         return(response)
@@ -901,128 +881,73 @@ class Memory(object):
         return(int.from_bytes(self.flashRead(addr, 2), byteorder='little'))
 
     def flashWrite(self, addr, data):
-        # if flash is empty or if we try to write to an already filled address, the flash cache is initialized
-        if not self._flash or len(self._flash[0][1]) > addr:
-            self.logger.debug("Flash cache initialized")
-            self._flash = {0 : [self._flash_size, bytearray()]} # just one chunk from start to end
-        self.insertNewBlock(addr, data) # chunk not found error and writing over end of chunk is not possible here
-        if addr % self._multi_page_size != 0: # address is not on page boundary
-            self.logger.debug("Page at 0x%X does not start at page boundary, will be adjusted to: 0x%X",
-                                  addr, addr - (addr % self._multi_page_size))
-            addr -= (addr % self._multi_page_size)
-        self.flashPages(0, addr)
-        
-    def memoryMap(self):
         """
-        Return a memory map in XML format. Include registers and IO regs and EEPROM in SRAM area
+        This writes an abitrary chunk of data to flash. If addr is lower than len(self._flash),
+        the cache is cleared. This should do the right thing when loading is implemented with X-records. 
         """
-        return ('l<memory-map><memory type="ram" start="{0}" length="{1}"/>' + \
-                             '<memory type="flash" start="{2}" length="{3}">' + \
-                             '<property name="blocksize">{4}</property>' + \
-                             '</memory></memory-map>').format(0 + 0x800000, \
-                             (self._eeprom_start + self._eeprom_size), self._flash_start, self._flash_size, self._flash_page_size)
+        if addr < len(self._flash):
+            self.initFlash()
+        self.storeToCache(addr, data)
+        self.flashPages()
 
-    def initFlash(self):
+    def storeToCache(self, addr, data):
         """
-        Initialze flash by emptying it.
+        Store chunks into the flash cache. Programming will take place later.
         """
-        self._flash = {}
+        if addr < len(self._flash):
+            raise FatalError("Overlapping  flash areas at 0x%X" % addr)
+        self._flash.extend(bytearray([0xFF]*(addr - len(self._flash) )))
+        self._flash.extend(data)
 
-    def is_flash_empty(self):
-        return not self._flash
-
-    def check_chunk_overlap(self):
+    def flashPages(self):
         """
-        Checks for overlap in the list of chunks. Should not happen at all!
+        Write pages to flash memory, starting at _flashmem_start_prog up to len(self._flash)-1.
+        Since programming takes place in chunks of size self._multi_page_size, beginning and end
+        needs to be adjusted. At the end, we may add some 0xFFs.
         """
-        for x,y in zip(sorted(self._flash), sorted(self._flash)[1:]):
-            if (self._flash[x][0] > y):
-                raise FatalError("Chunk starting at 0x%04X overlaps chunk starting at 0x%04X" % (x, y))
-
-    def listOfChunks(self):
-        """
-        Return sorted list of starting addresses of chunks
-        """
-        return sorted(self._flash)
-
-    def insertNewChunk(self, startaddr, size):
-        """
-        Insert a new chunk beginning at 'startaddr' of size 'size'
-        Start address and end address will be adjusted so that it is always at
-        a (multi-)page boundary.
-        """
-        beg_addr = startaddr
-        end_addr = beg_addr + size
-        beg_addr = (beg_addr//self._multi_page_size)*self._multi_page_size
-        end_addr = ((end_addr+self._multi_page_size-1)//self._multi_page_size)*self._multi_page_size
-        self.logger.debug("Insert new chunk: 0x%04X -- 0x%04X", beg_addr, end_addr)
-        self._flash[beg_addr] = [ end_addr, bytearray() ]
-
-
-    def insertNewBlock(self, addr, data):
-        """
-        Insert a new block of memory into the 'flash cache'
-        Returns either True (when everything OK) or False, when chunk has not been found or
-        there is an overlap. The latter two things can only happen with vFlash.  
-        """
-        self.logger.debug("Insert new block into flash cache at 0x%X of length %d", addr, len(data))
-        for chunkaddr in self._flash:
-            if chunkaddr <= addr and addr < self._flash[chunkaddr][0]: # right chunk found
-                i = chunkaddr + len(self._flash[chunkaddr][1])
-                while i < addr:
-                    self._flash[chunkaddr][1].append(0xFF)
-                    i += 1
-                self._flash[chunkaddr][1].extend(data)
-                if len(self._flash[chunkaddr][1]) + chunkaddr > self._flash[chunkaddr][0]: # should not happen
-                    self.logger.error("Address for data 0x%X larger than addr 0x%X in packet vFlashWrite: 0x%X",
-                                          len(self._flash[chunkaddr][1]) + chunkaddr, self._flash[chunkaddr][0], addr)
-                    return False
-                else:
-                    return True
-        self.logger.error("No previous vFlashErase packet for vFlashWrite at: 0x%X", addr)
-        return False
-
-    def flashPages(self, chunkaddr, startaddr):
-        """
-        Write pages to flash memory from the chunk starting at chunkaddr and start at address startaddr
-        """
-        pgsiz = self._flash_page_size
-        multbuf = self._multi_buffer
-        mpgsiz = self._multi_page_size
-        pgaddr = startaddr # should be on (multi-)page boundary!
-        memtype = self.dbg.device.avr.memtype_write_from_string('flash')
-        if pgaddr % mpgsiz != 0:
-            self.logger.critical("Flashing does not start at page boundary")
-        while pgaddr < len(self._flash[chunkaddr][1]) + chunkaddr:
+        startaddr = (self._flashmem_start_prog // self._multi_page_size) * self._multi_page_size
+        stopaddr = ((len(self._flash) + self._multi_page_size - 1) //
+                            self._multi_page_size) * self._multi_page_size
+        pgaddr = startaddr
+        while pgaddr < stopaddr:
             self.logger.debug("Flashing page starting at 0x%X", pgaddr)
-            pagetoflash = self._flash[chunkaddr][1][pgaddr-chunkaddr:]
-            if len(pagetoflash) > mpgsiz:
-                pagetoflash = pagetoflash[:mpgsiz]
-            else:
-                self.logger.debug("Incomplete page starting at 0x%X of length %d", pgaddr, len(pagetoflash))
+            pagetoflash = self._flash[pgaddr:pgaddr + self._multi_page_size]
             currentpage = bytearray([])
             if self.mon.is_fastload():
                 # interestingly, it is faster to read single pages than a multi-page chunk!
-                for p in range(multbuf):
-                    currentpage += self.dbg.flash_read(pgaddr+(p*pgsiz), pgsiz)
+                for p in range(self._multi_buffer):
+                    currentpage += self.dbg.flash_read(pgaddr+(p*self._flash_page_size), self._flash_page_size)
             if currentpage[:len(pagetoflash)] == pagetoflash:
                 self.logger.debug("Skip flashing page because already flashed at 0x%X", pgaddr)
             else:
                 self.logger.debug("Flashing now from 0x%X to 0x%X", pgaddr, pgaddr+len(pagetoflash))
-                pagetoflash += bytearray([0xFF]*(mpgsiz-len(pagetoflash))) # fill up incomplete page
-                self.dbg.device.avr.write_memory_section(memtype,
+                pagetoflash.extend(bytearray([0xFF]*(self._multi_page_size-len(pagetoflash)))) # fill incomplete page
+                self.dbg.device.avr.write_memory_section(self._flashmemtype,
                                                             pgaddr,
                                                             pagetoflash,
-                                                            pgsiz,
-                                                            allow_blank_skip=False)
+                                                            self._flash_page_size,
+                                                            allow_blank_skip=(self._multi_buffer == 1))
                 if self.mon.is_verify():
                     readbackpage = bytearray([])
-                    for p in range(multbuf):
-                        readbackpage += self.dbg.flash_read(pgaddr+(p*pgsiz), pgsiz)
+                    for p in range(self._multi_buffer):
+                        readbackpage += self.dbg.flash_read(pgaddr+(p*self._flash_page_size),
+                                                                     self._flash_page_size)
                     if readbackpage != pagetoflash:
                         raise FatalError("Flash verification error on page 0x{:X}".format(pgaddr))
-            pgaddr += mpgsiz
+            pgaddr += self._multi_page_size
+        self.flashmem_start_prog = len(self._flash)
     
+    def memoryMap(self):
+        """
+        Return a memory map in XML format. Include registers, IO regs, and EEPROM in SRAM area
+        """
+        return ('l<memory-map><memory type="ram" start="0x{0:X}" length="0x{1:X}"/>' + \
+                             '<memory type="flash" start="0x{2:X}" length="0x{3:X}">' + \
+                             '<property name="blocksize">0x{4:X}</property>' + \
+                             '</memory></memory-map>').format(0 + 0x800000, \
+                             (0x10000 + self._eeprom_start + self._eeprom_size),
+                              self._flash_start, self._flash_size, self._multi_page_size)
+
 
 class BreakAndExec(object):
     """
@@ -1036,7 +961,7 @@ class BreakAndExec(object):
         self.logger = getLogger('BreakAndExec')
         self._hwbps = hwbps
         self._readFlashWord = readFlashWord
-        self._hw = [None for x in range(self._hwbps)]
+        self._hw = [None]*self._hwbps
         self._bp = dict()
         self._bpactive = 0
         self._bstamp = 0
@@ -1048,12 +973,18 @@ class BreakAndExec(object):
 
     def insertBreakpoint(self, address):
         """
-        Generate a new breakpoint at give address, do not allocate flash or hwbp yet
+        Generate a new breakpoint at given address, do not allocate flash or hwbp yet
         Will return False if no breakpoint can be set.
         This method will be called immediately before GDB starts executing or single-stepping
         """
+        if address % 2 != 0:
+            self.logger.error("Breakpoint at odd address: 0x%X", address)
+            return False
+        if self.mon.is_old_exec():
+            self.dbg.software_breakpoint_set(address)
+            return True
         if address in self._bp: # bp already set, needs to be activated
-            self.logger.debug("Already existing BP at 0x%X will be re-activated",addr)
+            self.logger.debug("Already existing BP at 0x%X will be re-activated",address)
             if not self._bp[address]['active']: # if already active, ignore
                 if self._bpactive >= self._hwbps and self.mon.is_onlyhwbps():
                     self.logger.debug("Cannot set breakpoint at 0x%X because there are too many", address)
@@ -1062,12 +993,12 @@ class BreakAndExec(object):
                 self._bpactive += 1
                 self.logger.debug("Set BP at 0x%X to active", address)
             else:
-                self.logger.debug("There is already a BP at 0x%X to active", address)
-        return True
+                self.logger.debug("There is already a BP at 0x%X active", address)
+            return True
 
         self.logger.debug("New BP at 0x%X", address)
         if self._bpactive >= self._hwbps and self.mon.is_onlyhwbps():
-            self.logger.debug("Too many HWBPs requested. Cannot honor request for BP at 0x%X", address)
+            self.logger.error("Too many HWBPs requested. No BP at: 0x%X", address)
             return False
         opcode = self._readFlashWord(address)
         secondword = self._readFlashWord(address+2)
@@ -1084,23 +1015,32 @@ class BreakAndExec(object):
         Will mark a breakpoint as non-active, but it will stay in flash memory.
         This method is called immmediately after execution is stopped.
         """
+        if address % 2 != 0:
+            self.logger.error("Breakpoint at odd address: 0x%X", address)
+            return
+        if self.mon.is_old_exec():
+            self.dbg.software_breakpoint_clear(address)
+            return True
         if not (address in self._bp) or not self._bp[address]['active']:
             self.logger.debug("BP at 0x%X was removed before", address)
             return # was already removed before
         self._bp[address]['active'] = False
         self._bpactive -= 1
         self.logger.debug("BP at 0x%X is now inactive", address)
-        self.logger.debug("Only %d are now active", self._bpactive)
+        self.logger.debug("Only %d BPs are now active", self._bpactive)
 
     def updateBreakpoints(self):
         """
         This is called directly before execution is started. It will remove inactive breakpoints,
         will assign the hardware breakpoints to the most recently added breakpoints, and
-        request to set active breakpoints that are not yet in flash into flash.
+        request to set active breakpoints into flash, if they not there already.
         """
         # remove inactive BPs
         self.logger.debug("Updating breakpoints before execution")
-        for a in self._bp:
+        for a in list(self._bp.keys()):
+            if self.mon.is_onlyswbps and self._bp[a]['hwbp']:
+                self._bp[a]['hwbp'] = None
+                self._hw = [None]*self._hwbps
             if not self._bp[a]['active']:
                 self.logger.debug("BP at 0x%X is not active anymore", a)
                 if self._bp[a]['inflash']:
@@ -1118,9 +1058,9 @@ class BreakAndExec(object):
             self._firsttime = False
             if self._bp:
                 sortaddr = sorted(self._bp)
-                self._bp[sortaddr[0]]['timestamp'] = bstamp
+                self._bp[sortaddr[0]]['timestamp'] = self._bstamp
                 self.logger.debug("BP at 0x%X got highest priority", sortaddr[0])
-                bstamp += 1
+                self._bstamp += 1
         # all remaining BPs are active
         # assign HWBPs to the most recently introduced BPs
         # but take into account the possibility that hardware breakpoints are not allowed
@@ -1132,29 +1072,30 @@ class BreakAndExec(object):
                 self.logger.debug("Is already assigned, either HWBP or SWBP")
                 continue
             if None in self._hw: # there is still an available hwbp
-                self.logger.debug("There is still a free HWBP at index: ", self._hw.index(None))
+                self.logger.debug("There is still a free HWBP at index: %s", self._hw.index(None))
                 self._bp[sortedbps[h][0]]['hwbp'] = self._hw.index(None)+1
                 self._hw[self._hw.index(None)] = sortedbps[h][0]
             else: # steal hwbp from oldest
                 self.logger.debug("Trying to steal HWBP")
-                for steal in reversed(sortedbps[self._hwbps:]):
-                    if steal[1]['hwbp']:
-                        self.logger.debug("BP at 0x%X is a HWBP", steal[0])
-                        self._bp[sortedbps[h][0]]['hwbp'] = steal[1]['hwbp']
-                        self.lgger.debug("Now BP at 0x%X is the HWP", sortedbps[h][0])
-                        self._hw[steal[1]['hwbp']] = sortedbps[h][0]
-                        self._bp[steal[0]]['hwbp'] = None
+                stealbps = sorted(self._bp.items(), key=lambda entry: entry[1]['timestamp'])
+                for s in range(len(stealbps)):
+                    if stealbps[s][1]['hwbp']:
+                        self.logger.debug("BP at 0x%X is a HWBP", stealbps[s][0])
+                        self._bp[sortedbps[h][0]]['hwbp'] = stealbps[s][1]['hwbp']
+                        self.logger.debug("Now BP at 0x%X is the HWP", sortedbps[h][0])
+                        self._hw[stealbps[s][1]['hwbp']-1] = sortedbps[h][0]
+                        self._bp[stealbps[s][0]]['hwbp'] = None
                         break
         # now request SW BPs, if they are not already in flash, and set the HW registers
         for a in self._bp:
             if self._bp[a]['inflash']:
                 self.logger.debug("BP at 0x%X is already in flash", a)
                 continue # already in flash
-            if self._bp[a]['hwbp'] > 1:
-                self.logger.debug("This should not happen!")
+            if self._bp[a]['hwbp'] and self._bp[a]['hwbp'] > 1:
+                self.logger.error("This case should not happen with debugWIRE!")
                 #set HW BP, the '1' case will be handled by run_to
                 # this is future implementation when JTAG or UPDI enter the picture
-                raise FatalError("More than one HW BP!") 
+                continue
             if not self._bp[a]['inflash'] and not self._bp[a]['hwbp']:
                 self.logger.debug("BP at 0x%X will now be set as a SW BP")
                 self.dbg.software_breakpoint_set(a)
@@ -1173,12 +1114,20 @@ class BreakAndExec(object):
 
     def resumeExecution(self, addr):
         """
-        Start execution at given addr (byte addr). Check whether we are at a breakpoint with
-        a double-word instruction. If so, simulate the instruction and check, whether it is a BP
-        again. If so return SIGTRAP, otherwise continue. That avoids a double reprogramming! 
-        If it is a one-word instruction, the debugger
-        takes care of the execution of this instruction (hopefully).
+        Start execution at given addr (byte addr). If none given, use the actual PC.
+        Check whether we are at a breakpoint with a double-word instruction. 
+        If so, simulate the instruction and check, whether it is a BP
+        again. If so return SIGTRAP, otherwise continue. That avoids double reprogramming! 
+        If it is a one-word instruction, the hardware debugger
+        takes care of the execution of this instruction and will continue by itself.
         """
+        if addr:
+            self.dbg.program_counter_write(addr>>1)
+        else:
+            addr = self.dbg.program_counter_read() << 1
+        if self.mon.is_old_exec():
+            self.dbg.run()
+            return
         if addr in self._bp and self.twoWordInstr(self._bp[addr]['opcode']):
             # two-word intruction and breakpoint: simulate and advance PC
             self.logger.debug("We are at BP with a two-word instruction at 0x%X. Simulate!", addr)
@@ -1190,8 +1139,8 @@ class BreakAndExec(object):
                 self.logger.debug("Again a BP at 0x%X. Stop with SIGTRAP", addr) 
                 return SIGTRAP
         if self._hw[0] != None:
-            self.logger.debug("Run to cursor at 0x%X starting at", self._hw[0], addr)
-            self.dbg.run_to(self._hw[0] >>1)
+            self.logger.debug("Run to cursor at 0x%X starting at 0x%X", self._hw[0], addr)
+            self.dbg.run_to(self._hw[0]>>1) # according to docu, it is the word address
         else:
             self.logger.debug("Now start executing at 0x%X without HWBP", addr)
             self.dbg.run()
@@ -1209,45 +1158,51 @@ class BreakAndExec(object):
         For those branching on the I-Bit,
         we will evaluate and then set the hardware BP. 
         """
-        self.logger.debug("One single step at 0x%X", addr)
-        if addr in self._bp:
-            opcode = self._bp[addr]['opcode']
+        if addr:
+            self.dbg.program_counter_write(addr>>1)
         else:
-            opcode = self._readFlashWord(addr)
-        if self.twoWordInstr(opcode):
-            self.logger.debug("Two-word instruction")
-            secondword = self._readFlashWord(addr+2)
-            addr = self.simTwoWordInstr(opcode, secondword, addr)
+            addr = self.dbg.program_counter_read() << 1
+        self.logger.debug("One single step at 0x%X", addr)
+        if self.mon.is_old_exec():
+            self.dbg.step()
+            return SIGTRAP
+        # if there is a two word instruction and a SWBP at the place where we want to step
+        if (addr in self._bp and self._bp[addr]['inflash']
+                and self.twoWordInstr(self._bp[addr]['opcode'])):
+            self.logger.debug("Two-word instruction at SWBP")
+            addr = self.simTwoWordInstr(self._bp[addr]['opcode'], self._bp[addr]['secondword'], addr)
             self.logger.debug("New PC(byte addr)=0x%X, return SIGTRAP", addr)
             self.dbg.program_counter_write(addr>>1)
             return SIGTRAP
-        self.dbg.program_counter_write(addr>>1) # set the actual PC
+        # if stepping is unsafe, just use the AVR stepper
         if self.mon.is_safe() == False:
-            self.logger.debug("Safe stepping is false. Use internal stepper, return SIGTRAP")
+            self.logger.debug("Safe stepping is false. Use AVR stepper, return SIGTRAP")
             self.dbg.step()
             return SIGTRAP
-        # now we have to do the dance using the HWBP
+        # now we have to do the dance using the HWBP or masking the I-bit
+        opcode = self._readFlashWord(addr)
         self.logger.debug("Interrupt-safe stepping begins here")
         if self.mon.is_onlyhwbps() and self._bpactive >= self._hwbps: # all HWBPs in use
-            self.logger.debug("We need a HWBP now, but all are in use, return SIGABRT")
+            self.logger.error("We need a HWBP for single-stepping, but all are in use: SIGABRT")
             return SIGABRT
         if (self._hw[0]): # steal HWBP0
             self.logger.debug("Steal HWBP0 from BP at 0x%X", self._hw[0])
             self._bp[self._hw[0]]['hwbp'] = None
             self._bp[self._hw[0]]['inflash'] = True
             self.dbg.software_breakpoint_set(self._hw[0])
-            self._hw[0] = Null
+            self._hw[0] = None
         destination = None
         # compute destination for straight-line instructions and branches on I-Bit
         if not self.branchInstr(opcode):
-            destination = addr + 2 # execute just this instruction (it is a one-word instr)
-            self.debugger("This is not a branch instruction. Destination=0x%X", destination)
+            destination = addr + 2 + 2*int(self.twoWordInstr(opcode))
+            self.logger.debug("This is not a branch instruction. Destination=0x%X", destination)
         if self.branchOnIBit(opcode):
-            destination = self.computeDestinationOfBranch(opcode, addr)
-            self.debugger("Branching on I-Bit. Destination=0x%X", destination)
+            ibit = bool(self.dbg.status_register_read()[0] & 0x80)
+            destination = self.computeDestinationOfBranch(opcode, ibit, addr)
+            self.logger.debug("Branching on I-Bit. Destination=0x%X", destination)
         if destination != None:
             self.logger.debug("Run to cursor..., return None")
-            self.run_to(destination>>1)
+            self.dbg.run_to(destination>>1)
             return None
         # for the remaining branch instructions, clear I-bit before and set it afterwards (if it was on before)
         self.logger.debug("Remaining branch instructions")
@@ -1260,58 +1215,49 @@ class BreakAndExec(object):
         self.logger.debug("Now make a step...")
         self.dbg.step()
         sreg = self.dbg.status_register_read()[0]
-        self.logger("New sreg=0x%X", sreg)
+        self.logger.debug("New sreg=0x%X", sreg)
         sreg |= ibit
-        self.logger("Restored sreg=0x%X", sreg)
+        self.logger.debug("Restored sreg=0x%X", sreg)
         self.dbg.status_register_write(bytearray([sreg]))
         self.logger.debug("Returning with SIGTRAP")
         return SIGTRAP
 
-    def branchInstr(self, opcode):
+    @staticmethod
+    def branchInstr(opcode):
         if (opcode & 0xFC00) == 0x1000: # CPSE
-            self.logger.debug("branch intruction: CPSE")
             return True
         if (opcode & 0xFFEF) == 0x9409: # IJMP / EIJMP
-            self.logger.debug("branch intruction: IJMP / EIJMP")
             return True
         if (opcode & 0xFFEE) == 0x9508: # RET, ICALL, RETI, EICALL
-            self.logger.debug("branch intruction: RET, ICALL, RETI. EICALL")
+            return True
+        if (opcode & 0xFE0C) == 0x940C: # CALL, JMP
             return True
         if (opcode & 0xFD00) == 0x9900: # SBIC, SBIS
-            self.logger.debug("branch intruction: SBIC / SBIS")
             return True
         if (opcode & 0xE000) == 0xC000: # RJMP, RCALL
-            self.logger.debug("branch intruction: RJMP, RCALL")
             return True
         if (opcode & 0xF800) == 0xF000: # BRBS, BRBC
-            self.logger.debug("branch intruction: BRBS, BRBC")
             return True
         if (opcode & 0xFC08) == 0xFC00: # SBRC, SBRS
-            self.logger.debug("branch intruction: SBRC, SBRS")
             return True
-        
         return False
 
-    def branchOnIBit(self, opcode):
-        if (opcode & 0xF807) == 0xF007: # BRID, BRIE
-            
-            return True
+    @staticmethod
+    def branchOnIBit(opcode):
+        return (opcode & 0xF807) == 0xF007 # BRID, BRIE
 
-    def computeDestinationOfBranch(self, opcode, addr):
-        sreg = self.dbg.status_register_read()[0]
+    @staticmethod
+    def computeDestinationOfBranch(opcode, ibit, addr):
         rdist = ((opcode >> 3) & 0x007F)
-        branch = bool(sreg & 0x80) ^ bool(opcode & 0x0400 != 0)
+        branch = ibit ^ bool(opcode & 0x0400 != 0)
         if not branch:
-            self.logger.debug("addr=0x%X, opcode=0x%X, sreg=0x%X, no branch, dest=0x%X",
-                                  addr, opcode, sreg, addr + 2) 
             return addr + 2
         else:
             tsc = rdist - int((rdist << 1) & 2**7) # compute twos complement
-            self.logger.debug("addr=0x%X, opcode=0x%X, sreg=0x%X, branch, dest=0x%X",
-                                  addr, opcode, sreg, addr + 2 + (rdist*2))
-            return addr + 2 + (rdist*2)
+            return addr + 2 + (tsc*2)
 
-    def twoWordInstr(self, opcode):
+    @staticmethod
+    def twoWordInstr(opcode):
         return(((opcode & ~0x01F0) == 0x9000) or ((opcode & ~0x01F0) == 0x9200) or
                 ((opcode & 0x0FE0E) == 0x940C) or ((opcode & 0x0FE0E) == 0x940E))
 
@@ -1336,7 +1282,7 @@ class BreakAndExec(object):
             addr = secondword << 1 ## now byte address
         elif (opcode & 0x0FE0E) == 0x940E: # call
             returnaddr = (addr + 4) >> 1 # now word address
-            sp = int.from_bytes(self.dbg.steck_pointer_read(),byteorder='little')
+            sp = int.from_bytes(self.dbg.stack_pointer_read(),byteorder='little')
             sp -= 2
             self.dbg.stack_pointer_write(self.dbg.sram_write(sp-1, returnaddr.to_bytes(2,byteorder='big')))
             addr = secondword << 1 
@@ -1361,7 +1307,7 @@ class MonitorCommand(object):
         self._safe = True
         self._verify = True
         self._timersfreeze = True
-        self._old_exec = True
+        self._old_exec = False
         self._noxml = False
         self._power = True
 
@@ -1479,7 +1425,7 @@ class MonitorCommand(object):
             self._onlyswbps = True
             return("", "Only software breakpoints are now allowed")
         else:
-            return self.monUnknown(token[0])
+            return self.monUnknown(tokens[0])
 
     def monCache(self, tokens):
         if "enable".startswith(tokens[0] and tokens[0] != "") or (tokens[0] == "" and self._cache == True):
@@ -1514,7 +1460,7 @@ class MonitorCommand(object):
             else:
                 return("", "debugWIRE mode was already disabled")
         else:
-            return self.monUnknown(token[0])
+            return self.monUnknown(tokens[0])
 
     def monFlashVerify(self, tokens):
         if "enable".startswith(tokens[0] and tokens[0] != "") or (tokens[0] == "" and self._verify == True):
@@ -1888,7 +1834,7 @@ def _setup_tool_connection(args, logger):
             logger.info("Connecting to {0:s} ({1:s})'".format(product, usb_serial))
         else:
             if usb_serial:
-                loger.info("Connecting to any tool with USB serial number '{0:s}'".format(usb_serial))
+                logger.info("Connecting to any tool with USB serial number '{0:s}'".format(usb_serial))
             elif product:
                 logger.info("Connecting to any {0:s}".format(product))
             else:

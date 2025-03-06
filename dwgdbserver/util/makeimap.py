@@ -2,7 +2,8 @@
 """
 Read the file given as an argument and return a dict called instrmap that
 maps each opcode to a memonic (if legal). The file contains an assembler listing
-with all known opcodes.
+with all known opcodes for the AVRe+ architecture. There are a few additional ones in
+AVRxm, but they are all non-branching and one word instructions.
 """
 import sys
 import re
@@ -27,12 +28,14 @@ def main():
         if elems[2][0:3] == 'sbr' or elems[2] == 'sbic' or elems[2] == 'sbis' or \
             elems[2][0:2] == 'br' or elems[2] == 'cpse':
             type = 'cond'
-        elif elems[2] in ['ijmp', 'eijmp', 'ret', 'icall', 'reti', 'eicall', 'call', 'rjmp', 'rcall']:
+        elif elems[2] in ['jmp', 'ijmp', 'eijmp', 'ret', 'icall', 'reti', 'eicall', 'call', 'rjmp', 'rcall']:
             type = 'branch'
         if elems[2] in ['brie', 'brid']:
             type = 'icond'
         print("0x{}{} : ('{}', {}, '{}'),".format(elems[1], elems[0], elems[2], words, type))
-    print("0x9598 : ('break', 1, 'nobranch')")
+    print("0x9598 : ('break', 1, 'nobranch'),")
+    print("0x9519 : ('eicall', 1, 'branch'),")
+    print("0x9419 : ('eijmp', 1, 'branch'),")
     print("}")
 
 if __name__ == "__main__":
