@@ -2,7 +2,7 @@
 
 ### What is it good for?
 
-This Python script acts as a [gdbserver](https://sourceware.org/gdb/current/onlinedocs/gdb.html/Server.html#Server) for [*debugWIRE*](https://debugwire.de) MCUs, such as the ATmega328P.  It can communicate with Microchip debuggers such as [Atmel-ICE](https://www.microchip.com/en-us/development-tool/atatmel-ice) and [MPLAB SNAP](https://www.microchip.com/en-us/development-tool/atatmel-ice) (in AVR mode), and it provides a pass-through service for the DIY hardware debugger [dw-link](https://github.com/felias-fogg/dw-link). For Microchip debuggers, it uses the infrastructure provided by [pymcuprog](https://github.com/microchip-pic-avr-tools/pymcuprog) and [pyedgblib](https://github.com/microchip-pic-avr-tools/pyedbglib) to implement a full-blown gdbserver. 
+This Python script acts as a [gdbserver](https://sourceware.org/gdb/current/onlinedocs/gdb.html/Server.html#Server) for [*debugWIRE*](https://debugwire.de) MCUs, such as the ATmega328P.  It can communicate with Microchip debuggers such as [Atmel-ICE](https://www.microchip.com/en-us/development-tool/atatmel-ice) and [MPLAB SNAP](https://www.microchip.com/en-us/development-tool/pg164100) (in AVR mode), and it provides a pass-through service for the DIY hardware debugger [dw-link](https://github.com/felias-fogg/dw-link). For Microchip debuggers, it uses the infrastructure provided by [pymcuprog](https://github.com/microchip-pic-avr-tools/pymcuprog) and [pyedgblib](https://github.com/microchip-pic-avr-tools/pyedbglib) to implement a full-blown gdbserver. 
 
 By the way, switching to AVR mode in the SNAP debugger is easily accomplished by using avrdude (>= Version 7.3):
 
