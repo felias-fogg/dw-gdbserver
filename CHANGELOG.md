@@ -1,5 +1,11 @@
 # Changelog
 
+### V2.0.0-pre4 (17-Mar-2025)
+
+- Added: Range stepping. It works most effectively with just one exit point in the range. Otherwise, we stop at every branch point and single-step. Will be more effective if more hardware breakpoints are accessible. I do not see a reason to use software breakpoints to implement range stepping.
+- Added `monitor rangestepping` command.
+- Fixed: several bugs introduced by refactoring.
+
 ### V2.0.0-pre3 (6-Mar-2025)
 
 - Added: Tests for GdbHandler, Memory, and BreakAndExec

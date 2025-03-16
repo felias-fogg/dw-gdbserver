@@ -2,7 +2,7 @@
 
 ### What is it good for?
 
-This Python script acts as a GDB server for [**debugWIRE**](https://debugwire.de) MCUs, such as the ATmega328P.  It can communicate with Microchip debuggers such as [Atmel-ICE](https://www.microchip.com/en-us/development-tool/atatmel-ice) and [MPLAB SNAP](https://www.microchip.com/en-us/development-tool/atatmel-ice) (in AVR mode), and it provides a pass-through service for the DIY hardware debugger [dw-link](https://github.com/felias-fogg/dw-link). For Microchip debuggers, it uses the infrastructure provided by [pymcuprog](https://github.com/microchip-pic-avr-tools/pymcuprog) and [pyedgblib](https://github.com/microchip-pic-avr-tools/pyedbglib) to implement a full-blown GDB server. 
+This Python script acts as a [gdbserver](https://sourceware.org/gdb/current/onlinedocs/gdb.html/Server.html#Server) for [*debugWIRE*](https://debugwire.de) MCUs, such as the ATmega328P.  It can communicate with Microchip debuggers such as [Atmel-ICE](https://www.microchip.com/en-us/development-tool/atatmel-ice) and [MPLAB SNAP](https://www.microchip.com/en-us/development-tool/atatmel-ice) (in AVR mode), and it provides a pass-through service for the DIY hardware debugger [dw-link](https://github.com/felias-fogg/dw-link). For Microchip debuggers, it uses the infrastructure provided by [pymcuprog](https://github.com/microchip-pic-avr-tools/pymcuprog) and [pyedgblib](https://github.com/microchip-pic-avr-tools/pyedbglib) to implement a full-blown gdbserver. 
 
 By the way, switching to AVR mode in the SNAP debugger is easily accomplished by using avrdude (>= Version 7.3):
 
@@ -71,9 +71,9 @@ Note: automatically using hardware breakpoints for read-only addresses.
 | `--gede`<br>`-g`     | No argument for this option. This option will start the `Gede` debugger GUI. |
 | `--port` <br>`-p`    | IP port on the local host to which GDB can connect.          |
 | `--start` <br>`-s`   | Program to start or the string `noop`, when no program should be started |
-| `--tool`<br>`-t`     | Specifying the debug tool. Possible values are `atmelice`, `edbg`, `jtagice3`, `medbg`, `nedbg`, `pickit4`, `powerdebugger`, `snap`, `dwlink`. Use of this option is helpful only if more than one debugging tool is connected to the computer. |
+| `--tool`<br>`-t`     | Specifying the debug tool. Possible values are `atmelice`, `edbg`, `jtagice3`, `medbg`, `nedbg`, `pickit4`, `powerdebugger`, `snap`, `dwlink`. Use of this option is necessary only if more than one debugging tool is connected to the computer. |
 | `--usbsn` <br>`-u`   | USB serial number of the tool. This is only necessary if one has multiple debugging tools connected to the computer. |
-| `--verbose` <br>`-v` | Specify verbosity level. Possible values are `debug`, `info`, `warning`, `error`, or `critical`. |
+| `--verbose` <br>`-v` | Specify verbosity level. Possible values are `debug`, `info`, `warning`, `error`, or `critical`. The default is `info`. |
 | `--version` <br>`-V` | Print dw-gdbserver version number and exit.                  |
 
 
@@ -91,6 +91,8 @@ In addition to the above mentioned command for enabling debugWIRE mode, there ar
 | `monitor breakpoints` [`all`\|`software`\|`hardware`] | Restricts the kind of breakpoints the hardware debugger can use. Either *all* types are permitted, only *software* breakpoints are allowed, or only *hardware* breakpoints can be used. Using all kinds is the default. |
 | `monitor caching` [`enable`\|`disable`]               | The loaded executable is used as a cache in the gdbserver when *enabled*, which is the default. |
 | `monitor debugwire` [`enable`\|`disable`]             | DebugWIRE mode will be enabled or disabled. When enabling it, you may be asked to power-cycle the target. After disabling debugWIRE mode, the MCU can be programmed again using ISP programming. |
+| `monitor help`                                        | Display help text.                                           |
+| `monitor info`                                        | Display information about the target and the state of the debugger. |
 | `monitor load` [`readbeforewrite`\|`writeonly`]       | When loading an executable, either each flash page is compared with the content to be loaded, and flashing is skipped if the content is already there, or each flash page is written without reading the current contents beforehand. The first option is the default option and there is no reason to change it. |
 | `monitor onlyloaded` [`enable`\|`disable`]            | Execution is only possible when a `load` command was previously executed, which is the default. If you want to start execution without previously loading an executable, you need to disable this mode. |
 | `monitor reset`                                       | Resets the MCU.                                              |
@@ -99,22 +101,20 @@ In addition to the above mentioned command for enabling debugWIRE mode, there ar
 | `monitor verify` [`enable`\|`disable`]                | Verify flash after loading each flash page. The cost for verifying is negligible, and doing so might diagnose flash wear problems. The default is that this option is *enabled*. |
 | `monitor version`                                     | Show version of the gdbserver.                               |
 
-The default setting is always the first one listed, except for `debugwire`, where it depends on the MCU itself. All commands can, as usual, be abbreviated. For example, `mo d e` is equivalent to `monitor debugwire enable`. 
+The default setting is always the first one listed, except for `debugwire`, which depends on the MCU itself. All commands can, as usual, be abbreviated. For example, `mo d e` is equivalent to `monitor debugwire enable`. 
 
 ### List of supported and tested hardware debuggers
 
 Except for [dw-link](https://github.com/felias-fogg/dw-link), this list is copied from the readme file of [pyedbglib](https://github.com/microchip-pic-avr-tools/pyedbglib). Boldface means that the debuggers have been tested by me and work with this Python script.
 
 
-* PKOB nano (nEDBG) - on-board debugger on Curiosity Nano
 * **MPLAB PICkit 4 In-Circuit Debugger** (when in 'AVR mode')
 * **MPLAB Snap In-Circuit Debugger** (when in 'AVR mode')
 * **Atmel-ICE**
-* Power Debugger
-* EDBG - on-board debugger on Xplained Pro/Ultra
+* Atmel Power Debugger
 * **mEDBG - on-board debugger on Xplained Mini/Nano**
 * JTAGICE3 (firmware version 3.0 or newer)
-* **[dw-link](https://github.com/felias-fogg/dw-link)** - DIY debugWIRE debugger running on Arduino UNO R3
+* **[dw-link](https://github.com/felias-fogg/dw-link)** - **DIY debugWIRE debugger running on Arduino UNO R3**
 
 
 ### List of supported and tested MCUs

@@ -72,8 +72,13 @@ def discover(args):
                             ser.write(b'\x05') # try again sending ENQ                        
                             resp = ser.read(7) # now it should be the right response!
                         if resp == b'dw-link': # if we get this response, it must be an dw-link adapter
+                            # send type of MCU in a special RSP packet
+                            message = ('=' + args.dev).encode('ascii')
+                            checksum = sum(message)&0xFF
+                            ser.write(b'$' + message + b'#' + (b'%02X' % checksum))
                             return (sp, s.device)
-            except:
+            except Exception as e:
+                sys.stderr.write('[ERROR] ' + repr(e))
                 pass
     return (None, None)
 
