@@ -1,12 +1,6 @@
 """
 Python AVR MCU debugger
 """
-import time
-import sys
-
-import logging
-from logging import getLogger
-from pyedbglib.protocols import housekeepingprotocol
 from pyedbglib.protocols.avr8protocol import Avr8Protocol
 from pyedbglib.protocols.edbgprotocol import EdbgProtocol
 from pyedbglib.util import binary
@@ -14,13 +8,12 @@ from pyedbglib.util import binary
 from pymcuprog.avrdebugger import AvrDebugger
 from pymcuprog.deviceinfo import deviceinfo
 from pymcuprog.nvmupdi import NvmAccessProviderCmsisDapUpdi
-from pymcuprog.nvmdebugwire import NvmAccessProviderCmsisDapDebugwire
+from pymcuprog.pymcuprog_errors import PymcuprogToolConfigurationError,\
+     PymcuprogNotSupportedError
+
 from dwgdbserver.xnvmdebugwire import XNvmAccessProviderCmsisDapDebugwire
-from pymcuprog.nvmspi import NvmAccessProviderCmsisDapSpi
-from pymcuprog.pymcuprog_errors import PymcuprogToolConfigurationError, PymcuprogNotSupportedError, PymcuprogError
 
-
-
+# pylint: disable=line-too-long, consider-using-f-string
 class XAvrDebugger(AvrDebugger):
     """
     AVR debugger wrapper
@@ -31,15 +24,15 @@ class XAvrDebugger(AvrDebugger):
     :type use_events_for_run_stop_state: boolean
     """
     def __init__(self, transport, device, use_events_for_run_stop_state=True):
-        super(XAvrDebugger, self).__init__(transport)
+        super().__init__(transport)
         # Gather device info
         # moved here so that we have mem + device info even before dw has been started
         try:
             self.device_info = deviceinfo.getdeviceinfo("dwgdbserver.deviceinfo.devices." + device)
         except ImportError:
-            raise PymcuprogNotSupportedError("No device info for device: {}".format(device))
+            raise PymcuprogNotSupportedError("No device info for device: {}".format(device)) #pylint: disable=raise-missing-from
         if self.device_info['interface'].upper() !="UPDI" and \
-           not ('DEBUGWIRE' in self.device_info['interface'].upper()):
+           'DEBUGWIRE' not in self.device_info['interface'].upper():
             raise PymcuprogToolConfigurationError("pymcuprog debug wrapper only supports UPDI and debugWIRE devices")
 
         # Memory info for the device
@@ -76,7 +69,8 @@ class XAvrDebugger(AvrDebugger):
             # program
             self.device = XNvmAccessProviderCmsisDapDebugwire(self.transport, self.device_info)
             self.device.avr.setup_debug_session()
-            
+
+    # pylint: disable=line-too-long
     def start_debugging(self, flash_data=None):
         """
         Start the debug session
@@ -86,15 +80,12 @@ class XAvrDebugger(AvrDebugger):
         """
         self.logger.info("Starting debug session")
         self.device.start()
-
         if "DEBUGWIRE" in self.device_info['interface'].upper():
             self.attach(do_break=True)
-
         if self.device_info['interface'].upper() == "UPDI":
             # The UPDI device is now in prog mode
             device_id = self.device.read_device_id()
             self.logger.debug("Device ID read: %X", binary.unpack_le24(device_id))
-
             # If the user wants content on the AVR, put it there now
             if flash_data:
                 if not isinstance(flash_data, list):
@@ -102,17 +93,13 @@ class XAvrDebugger(AvrDebugger):
                 # First chip-erase
                 self.logger.info("Erasing target")
                 self.device.erase()
-                
                 # Then program
                 self.logger.info("Programming target")
                 self.device.write(self.memory_info.memory_info_by_name('flash'), 0, flash_data)
-
                 # Flush events before starting
                 self.flush_events()
-                
                 self.logger.info("Leaving prog mode (with auto-attach)")
                 self.device.avr.protocol.leave_progmode()
-                
                 self._wait_for_break()
 
     def stack_pointer_write(self, data):
@@ -164,4 +151,3 @@ class XAvrDebugger(AvrDebugger):
         """
         self.logger.debug("Writing register file")
         self.device.avr.regfile_write(regs)
-

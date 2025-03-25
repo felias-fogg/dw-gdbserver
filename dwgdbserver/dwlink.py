@@ -1,15 +1,18 @@
-# Discover dw-link and then redirect data from a TCP/IP connection to the serial port and vice versa.
-# Further, send the device name in specially designed RSP record and wait for Ack
-# Based on Chris Liechti's tcp_serial_redirect script
-#
+"""
+Discover dw-link and then redirect data from a TCP/IP connection to the serial port and vice versa.
+Further, send the device name in specially designed RSP record and wait for Ack
+Based on Chris Liechti's tcp_serial_redirect script
+"""
+# pylint: disable=consider-using-f-string
 import sys
+import shutil
+import shlex
+import subprocess
+import time
 import socket
 import serial
 import serial.threaded
-import time
 import serial.tools.list_ports
-import shutil, shlex, subprocess
-import argparse
 
 
 class SerialToNet(serial.threaded.Protocol):
@@ -28,29 +31,34 @@ class SerialToNet(serial.threaded.Protocol):
             self.socket.sendall(data)
             self.last += data
             if self.last:
-                    if self.last[-1] == ord('+') or (len(self.last) > 2 and self.last[-3] == ord('#')):
-                        if len(self.last) > 2 and self.last[1] == ord('O') and self.last[2] != ord('K'):
-                            message = self.convert_gdb_message()
-                        else:
-                            message = ""
-                        if self.logging:
-                            sys.stdout.write("repl: {}\n".format(self.last))
-                            if message:
-                                sys.stdout.write("dw-link message: {}\n".format(message))
-                            sys.stdout.flush()
-                        elif len(message) > 2 and message[:3] == '***':
-                            sys.stderr.write("dw-link message: {}\n".format(message))
-                            sys.stderr.flush()
-                        self.last = b""
+                if self.last[-1] == ord('+') or (len(self.last) > 2 and self.last[-3] == ord('#')):
+                    if len(self.last) > 2 and self.last[1] == ord('O') and self.last[2] != ord('K'):
+                        message = self.convert_gdb_message()
+                    else:
+                        message = ""
+                    if self.logging:
+                        sys.stderr.write("[DEBUG] repl: {}\n".format(self.last))
+                        if message:
+                            sys.stderr.write("[DEBUG] dw-link: {}\n".format(message))
+                        sys.stdout.flush()
+                    elif len(message) > 2 and message[:3] == '***':
+                        sys.stderr.write("[ERROR] {}\n".format(message))
+                        sys.stderr.flush()
+                    self.last = b""
 
     def convert_gdb_message(self):
+        """
+        converts hex string into an UTF-8 text message
+        """
         bs = self.last[2:self.last.find(b'#')]
         hv = bs.decode('utf-8')
         bv = bytes.fromhex(hv)
         return bv.decode('utf-8')
-    
-# discovers the dw-link adapter, if present
+
 def discover(args):
+    """
+    Discovers the dw-link adapter, if present
+    """
     for delay in (0.2, 2):
         for s in serial.tools.list_ports.comports(True):
             if args.verbose == "debug":
@@ -63,32 +71,37 @@ def discover(args):
                 sys.stdout.flush()
             try:
                 for sp in (115200, ):
-                    with serial.Serial(s.device, sp, timeout=0.1, write_timeout=0.1, exclusive=True) as ser:
+                    with serial.Serial(s.device, sp, timeout=0.1,
+                                           write_timeout=0.1, exclusive=True) as ser:
                         time.sleep(delay)
                         ser.write(b'\x05') # send ENQ
                         resp = ser.read(7) # under Linux, the first response might be empty
                         if resp != b'dw-link':
                             time.sleep(0.2)
-                            ser.write(b'\x05') # try again sending ENQ                        
+                            ser.write(b'\x05') # try again sending ENQ
                             resp = ser.read(7) # now it should be the right response!
-                        if resp == b'dw-link': # if we get this response, it must be an dw-link adapter
+                        # if we get this response, it must be an dw-link adapter
+                        if resp == b'dw-link':
                             # send type of MCU in a special RSP packet
                             message = ('=' + args.dev).encode('ascii')
                             checksum = sum(message)&0xFF
                             ser.write(b'$' + message + b'#' + (b'%02X' % checksum))
                             return (sp, s.device)
-            except Exception as e:
+            except Exception as e: # pylint: disable=broad-exception-caught
                 sys.stderr.write('[ERROR] ' + repr(e))
-                pass
     return (None, None)
 
 def main(args):
+    """
+    Main function providing an serial-to-IP bridge for the dw-link hardware debugger 
+    """
+    #pylint: disable=too-many-statements, too-many-branches, too-many-nested-blocks
     # discover adapter
     speed, device = discover(args)
-    if speed == None or device == None:
+    if speed is None or device is None:
         sys.stderr.write('*** No hardware debugger discovered **\n')
         sys.exit(1)
-    
+
     # connect to serial port
     ser = serial.serial_for_url(device, do_not_open=True)
     ser.baudrate = speed
@@ -118,20 +131,21 @@ def main(args):
         srv.bind(('', args.port))
         srv.listen(1)
     except OSError as error:
-        sys.stderr.write("OSError: " + error.strerror +"\n\r");
+        sys.stderr.write("OSError: " + error.strerror +"\n\r")
         sys.exit(3)
-        
+
+    subprc = None
     if args.prg and args.prg != "noop":
         cmd = shlex.split(args.prg)
         cmd[0] = shutil.which(cmd[0])
-        subprc = subprocess.Popen(cmd)
+        subprc = subprocess.Popen(cmd) #pylint: disable=consider-using-with
 
     try:
         while True:
             sys.stdout.write("Connected to dw-link debugger\r\n")
             sys.stdout.write("Info : Listening on port {} for gdb connection\n\r".format(args.port))
             sys.stdout.flush()
-            
+
             client_socket, addr = srv.accept()
             sys.stderr.write('Connected by {}\n'.format(addr))
             # More quickly detect bad clients who quit without closing the
@@ -144,7 +158,7 @@ def main(args):
                 client_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 3)
                 client_socket.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
             except AttributeError:
-                pass # XXX not available on windows
+                pass
             client_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             try:
                 ser_to_net.socket = client_socket
@@ -169,9 +183,10 @@ def main(args):
                 sys.stderr.write('Disconnected\n')
                 ser.write(b'$D#44') # send detach command to dw-link debugger
                 client_socket.close()
-                break
     except KeyboardInterrupt:
         pass
 
+    if subprc:
+        subprc.kill()
     sys.stderr.write('\r\n--- exit ---\r\n')
     serial_worker.stop()

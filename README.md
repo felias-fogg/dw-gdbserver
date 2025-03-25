@@ -31,7 +31,7 @@ Once you have connected an appropriate hardware debugger to your target board, y
 [INFO] Connecting to anything possible
 [INFO] Connected to Atmel-ICE CMSIS-DAP
 [INFO] Starting dw-gdbserver
-[INFO] Looking for device attiny1634
+[INFO] Looking for device atmega328p
 [INFO] Listening on port 2000 for gdb connection
 
 ```
@@ -95,6 +95,7 @@ In addition to the above mentioned command for enabling debugWIRE mode, there ar
 | `monitor info`                                        | Display information about the target and the state of the debugger. |
 | `monitor load` [`readbeforewrite`\|`writeonly`]       | When loading an executable, either each flash page is compared with the content to be loaded, and flashing is skipped if the content is already there, or each flash page is written without reading the current contents beforehand. The first option is the default option and there is no reason to change it. |
 | `monitor onlyloaded` [`enable`\|`disable`]            | Execution is only possible when a `load` command was previously executed, which is the default. If you want to start execution without previously loading an executable, you need to disable this mode. |
+| `monitor rangestepping `[`enable`|`disable`]          | Allow for range-stepping.                                    |
 | `monitor reset`                                       | Resets the MCU.                                              |
 | `monitor singlestep` [`safe`\|`interruptible`]        | Single-stepping can either be performed in a *safe* way, where single steps are shielded against interrupts or in the default way, where a single step can lead to a jump into the interrupt dispatch table. The *safe* option is the default. |
 | `monitor timer` [`freeze`\|`run`]                     | Timers can either be *frozen* when execution is stopped, or they can *run* freely. The later option is helpful when PWM output is crucial. |

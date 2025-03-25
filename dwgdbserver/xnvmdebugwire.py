@@ -6,26 +6,28 @@ from pyedbglib.protocols.avr8protocol import Avr8Protocol
 
 from pymcuprog.nvmdebugwire import NvmAccessProviderCmsisDapDebugwire
 from pymcuprog.nvm import NvmAccessProviderCmsisDapAvr
-from dwgdbserver.xavr8target import XTinyAvrTarget
 from pymcuprog.pymcuprog_errors import PymcuprogError
 
-from pymcuprog.deviceinfo.deviceinfo import DeviceMemoryInfo
-from pymcuprog.deviceinfo.deviceinfokeys import DeviceInfoKeysAvr, DeviceMemoryInfoKeys
+from pymcuprog.deviceinfo.deviceinfokeys import DeviceMemoryInfoKeys
 from pymcuprog.deviceinfo.memorynames import MemoryNames
 
 from pymcuprog import utils
 
+from dwgdbserver.xavr8target import XTinyAvrTarget
 
+# pylint: disable=consider-using-f-string
 class XNvmAccessProviderCmsisDapDebugwire(NvmAccessProviderCmsisDapDebugwire):
     """
     NVM Access the DW way
     """
-
+    #pylint: disable=non-parent-init-called, super-init-not-called
+    #we want to set up thje debug session much later
     def __init__(self, transport, device_info):
         NvmAccessProviderCmsisDapAvr.__init__(self, device_info)
         self.avr = XTinyAvrTarget(transport)
         self.avr.setup_config(device_info)
 
+    #pylint: enable=non-parent-init-called, super-init-not-called
     def __del__(self):
         pass
 
@@ -33,11 +35,6 @@ class XNvmAccessProviderCmsisDapDebugwire(NvmAccessProviderCmsisDapDebugwire):
         """
         Start (activate) session for debugWIRE targets
 
-        :param user_interaction_callback: Callback to be called when user interaction is required,
-            for example when doing UPDI high-voltage activation with user target power toggle.
-            This function could ask the user to toggle power and halt execution waiting for the user
-            to respond (this is default behavior if the callback is None), or if the user is another
-            script it could toggle power automatically and then return.
         """
         self.logger.info("debugWIRE-specific initialiser")
 
@@ -48,7 +45,7 @@ class XNvmAccessProviderCmsisDapDebugwire(NvmAccessProviderCmsisDapDebugwire):
             if error.code == Avr8Protocol.AVR8_FAILURE_INVALID_PHYSICAL_STATE:
                 self.logger.info("Physical state out of sync.  Retrying.")
                 self.avr.deactivate_physical()
-                self.avr.activate_physical(user_interaction_callback=user_interaction_callback)
+                self.avr.activate_physical()
             else:
                 raise
 
@@ -58,7 +55,10 @@ class XNvmAccessProviderCmsisDapDebugwire(NvmAccessProviderCmsisDapDebugwire):
         """
         self.logger.debug("debugWIRE-specific de-initialiser")
         self.avr.deactivate_physical()
-            
+
+    # pylint: disable=arguments-differ
+    # reason for the difference: read and write are declared as staticmethod in the base class,
+    # which is an oversight, I believe
     def read(self, memory_info, offset, numbytes):
         """
         Read the memory in chunks
@@ -84,7 +84,8 @@ class XNvmAccessProviderCmsisDapDebugwire(NvmAccessProviderCmsisDapDebugwire):
                 pass
         else:
             # if we read chunks that are not page sized or not page aligned, then use SPM as memtype
-            if offset%memory_info[DeviceMemoryInfoKeys.PAGE_SIZE] != 0 or numbytes != memory_info[DeviceMemoryInfoKeys.PAGE_SIZE]:
+            if offset%memory_info[DeviceMemoryInfoKeys.PAGE_SIZE] != 0 or \
+              numbytes != memory_info[DeviceMemoryInfoKeys.PAGE_SIZE]:
                 memtype = Avr8Protocol.AVR8_MEMTYPE_SPM
 
         self.logger.debug("Reading from %s at %X %d bytes", memory_info['name'], offset, numbytes)
@@ -110,7 +111,8 @@ class XNvmAccessProviderCmsisDapDebugwire(NvmAccessProviderCmsisDapDebugwire):
             raise PymcuprogError(msg)
 
         if memtype_string != MemoryNames.EEPROM:
-            # For debugWIRE parts single byte access is enabled for EEPROM so no need to align to page boundaries
+            # For debugWIRE parts single byte access is enabled for
+            # EEPROM so no need to align to page boundaries
             data_to_write, address = utils.pagealign(data,
                                                      offset,
                                                      memory_info[DeviceMemoryInfoKeys.PAGE_SIZE],
@@ -128,20 +130,22 @@ class XNvmAccessProviderCmsisDapDebugwire(NvmAccessProviderCmsisDapDebugwire):
             allow_blank_skip = True
 
         if memtype_string in (MemoryNames.FLASH, MemoryNames.EEPROM):
-            # For Flash we have to write exactly one page but for EEPROM we could write less than one page,
-            # but not more. 
+            # For Flash we have to write exactly one page but for EEPROM we
+            # could write less than one page, but not more.
             write_chunk_size = memory_info[DeviceMemoryInfoKeys.PAGE_SIZE]
             if memtype_string != MemoryNames.EEPROM:
                 data_to_write = utils.pad_to_size(data_to_write, write_chunk_size, 0xFF)
+            first_chunk_size = write_chunk_size - address%write_chunk_size
         else:
             write_chunk_size = len(data_to_write)
+            # changed computation of first_chunk_size for SRAM:
+            first_chunk_size = write_chunk_size
 
         self.logger.info("Writing %d bytes of data in chunks of %d bytes to %s...",
                          len(data_to_write),
                          write_chunk_size,
                          memory_info[DeviceMemoryInfoKeys.NAME])
 
-        first_chunk_size = write_chunk_size - address%write_chunk_size
         self.avr.write_memory_section(memtype,
                                       address,
                                       data_to_write[:first_chunk_size],

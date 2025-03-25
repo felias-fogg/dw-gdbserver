@@ -1,5 +1,11 @@
 # Changelog
 
+### V2.0.0-pre5 (25-Mar-2025)
+
+- Added: `monitor info` command
+- Added: test cases for all modules that pass python -m unittest
+- Changed: Made all modules pylint compliant
+
 ### V2.0.0-pre4 (17-Mar-2025)
 
 - Added: Range stepping. It works most effectively with just one exit point in the range. Otherwise, we stop at every branch point and single-step. Will be more effective if more hardware breakpoints are accessible. I do not see a reason to use software breakpoints to implement range stepping.
@@ -107,7 +113,6 @@
 - Added: S and C record handling is now necessary because GDB propagates signals other than SIGTRAP
 - Added: Check for overlapping chunks when flashing
 - Fixed: Reading single flash bytes (even at mis-aligned byte addresses) works now.
-- Added: `monitor noload`, which allows for execution even if no prior `load` command has been executed
 
 ### V0.9.10 (14-Feb-2025)
 
@@ -123,8 +128,7 @@
 ### V0.9.8 (14-Feb-2025)
 
 - Added: `monitor noload` will allow execution even without a previous
-  load command. It will be taken as a request to cache the entire
-  flash in the debugger.
+  load command. 
 
 ### V0.9.6 (13-Feb-2025)
 
@@ -150,12 +154,12 @@ With that, debugging works now after having just enabled the debugWIRE mode.
 - Apparently, one should not request a reset after connecting. Removing that helped a lot. Well, turned out later that this was a symptom of not restarting the housekeeping session (see V0.9.5).
 - MCUs with Stuck-at-1-bits are identified.
 - Added code to honor the fact that the ATmega88/168/328 pretend to be P-versions when in debugWIRE mode
-- Set the EEARH field in the activation record to EEARl+1. This seems to be the right choice when following the datasheet for the ATmega48. And it led to success in starting the MCU.
+- Set the EEARH field in the activation record to EEARL+1. This seems to be the right choice when following the datasheet for the ATmega48. And it led to success in starting the MCU.
 
 ### V0.9.1 (11-Feb-2025)
 
 - Works now with ATmega328P
-- harvested all debugWIRE MCUs with the new scrip‚t dw-harvest.py
+- harvested all debugWIRE MCUs with the new script dw-harvest.py
 - does not work with ATmega48, and probably not with others ...
 
 ### V0.9.0 (8-Feb-2025)
@@ -193,7 +197,7 @@ With that, debugging works now after having just enabled the debugWIRE mode.
 ### V0.0.5 (6-Feb-2005)
 
 - flash programming has been implemented
-- now, each memory page is checked before flashing in order to avoid flashing identical contents, speeds up loading from 1kB/sec to 14kB/sec
+- now, each memory page is checked before flashing in order to avoid flashing identical contents, speeds up loading from 1kB/sec to 14kB/sec on Atmel-ICE
 
 - rewrote "handleData" so that it is now able to cope with NAKs (which are very unlikely)
 

@@ -100,6 +100,15 @@ class TestMonitorCommand(TestCase):
         self.assertEqual(self.mo.dispatch(['only', 'enable']), ("",  "Execution without prior 'load' command is impossible"))
         self.assertFalse(self.mo._noload)
 
+    def test_dispatch_range(self):
+        self.assertTrue(self.mo._range)
+        self.assertEqual(self.mo.dispatch(['rangestepping', 'disable']), ("", "Range stepping is disabled"))
+        self.assertFalse(self.mo._range)
+        self.assertEqual(self.mo.dispatch(['range']), ("", "Range stepping is disabled"))
+        self.assertEqual(self.mo.dispatch(['rangestepping', 'enable']), ("", "Range stepping is enabled"))
+        self.assertTrue(self.mo._range)
+
+
     def test_dispatch_reset(self):
         self.mo._dw_mode_active = False
         self.assertEqual(self.mo.dispatch(['reset', 'halt']), ("","Enable debugWIRE mode first"))
@@ -127,3 +136,4 @@ class TestMonitorCommand(TestCase):
         
         
         
+

@@ -1,20 +1,12 @@
 """
-debugWIRE GDBServer 
+debugWIRE GDBServer
 """
-
-NOSIG   = 0     # no signal
-SIGHUP  = 1     # no connection
-SIGINT  = 2     # Interrupt  - user interrupted the program (UART ISR) 
-SIGILL  = 4     # Illegal instruction
-SIGTRAP = 5     # Trace trap  - stopped on a breakpoint
-SIGABRT = 6     # Abort because of a fatal error or no breakpoint available
+# pylint: disable=too-many-lines, consider-using-f-string
 
 # args, logging
 import importlib.metadata
-import time
 import sys
 import argparse
-import os
 import logging
 from logging import getLogger
 import textwrap
@@ -29,88 +21,96 @@ import time
 
 # debugger modules
 import pymcuprog
-from pyedbglib.protocols.avr8protocol import Avr8Protocol 
-from pyedbglib.protocols.edbgprotocol import EdbgProtocol 
+from pyedbglib.protocols.avr8protocol import Avr8Protocol
+from pyedbglib.protocols.edbgprotocol import EdbgProtocol
 from pyedbglib.hidtransport.hidtransportfactory import hid_transport
-from dwgdbserver.xavrdebugger import XAvrDebugger
 from pymcuprog.backend import Backend
 from pymcuprog.pymcuprog_main import  _clk_as_int # _setup_tool_connection
 from pymcuprog.toolconnection import ToolUsbHidConnection, ToolSerialConnection
 from pymcuprog.nvmspi import NvmAccessProviderCmsisDapSpi
-from pymcuprog.deviceinfo import deviceinfo
 from pymcuprog.utils import read_target_voltage
-from pymcuprog.pymcuprog_errors import PymcuprogToolConfigurationError, PymcuprogNotSupportedError, PymcuprogError
+from pymcuprog.pymcuprog_errors import PymcuprogNotSupportedError, PymcuprogError
+
+from dwgdbserver import dwlink
+from dwgdbserver.xavrdebugger import XAvrDebugger
 from dwgdbserver.deviceinfo.devices.alldevices import dev_id, dev_name
 
-# alternative debug server that connects to the dw-link hardware debugger
-import dwgdbserver.dwlink
+NOSIG   = 0     # no signal
+SIGHUP  = 1     # no connection
+SIGINT  = 2     # Interrupt  - user interrupted the program (UART ISR)
+SIGILL  = 4     # Illegal instruction
+SIGTRAP = 5     # Trace trap  - stopped on a breakpoint
+SIGABRT = 6     # Abort because of a fatal error or no breakpoint available
+SIGBUS = 10    # Segmentation violation means in our case stack overflow
+
 
 class EndOfSession(Exception):
     """Termination of session"""
-    def __init__(self, msg=None, code=0):
-        super(EndOfSession, self).__init__(msg)
+    def __init__(self, msg=None):
+        super().__init__(msg)
 
 class FatalError(Exception):
     """Termination of session because of a fatal error"""
-    def __init__(self, msg=None, code=0):
-        super(FatalError, self).__init__(msg)
+    def __init__(self, msg=None):
+        super().__init__(msg)
 
 class GdbHandler():
+    #pylint: disable=too-many-instance-attributes
     """
     GDB handler
     Maps between incoming GDB requests and AVR debugging protocols (via pymcuprog)
     """
-    def __init__ (self, socket, avrdebugger, devicename):
+    def __init__ (self, comsocket, avrdebugger, devicename):
+        self.packet_size = 8000
         self.logger = getLogger('GdbHandler')
-        self.socket = socket
         self.dbg = avrdebugger
         self.dw = DebugWIRE(avrdebugger, devicename)
         self.mon = MonitorCommand()
         self.mem = Memory(avrdebugger, self.mon)
-        self.bp = BreakAndExec(1, self.mon, avrdebugger, self.mem.flashReadWord)
-        self.devicename = devicename
-        self.lastSIGVAL = 0
-        self.lastmessage = ""
-        self.packet_size = 8000
-        self.extended_remote_mode = False
-        self.vflashdone = False # set to True after vFlashDone received and will then trigger clearing the flash cache
+        self.bp = BreakAndExec(1, self.mon, avrdebugger, self.mem.flash_read_word)
+        self._comsocket = comsocket
+        self._devicename = devicename
+        self.last_sigval = 0
+        self._lastmessage = ""
+        self._extended_remote_mode = False
+        self._vflashdone = False # set to True after vFlashDone received
 
 
         self.packettypes = {
-            '!'           : self.extendedRemoteHandler,
-            '?'           : self.stopReasonHandler,
-            'c'           : self.continueHandler,
-            'C'           : self.continueWithSignalHandler, # signal will be ignored
-            'D'           : self.detachHandler,
-            'g'           : self.getRegisterHandler,
-            'G'           : self.setRegisterHandler,
-            'H'           : self.setThreadHandler,
+            '!'           : self._extended_remote_handler,
+            '?'           : self._stop_reason_handler,
+            'c'           : self._continue_handler,
+            'C'           : self._continue_with_signal_handler, # signal will be ignored
+            'D'           : self._detach_handler,
+            'g'           : self._get_register_handler,
+            'G'           : self._set_register_handler,
+            'H'           : self._set_thread_handler,
           # 'k'           : kill - never used because vKill is supported
-            'm'           : self.getMemoryHandler,
-            'M'           : self.setMemoryHandler,
-            'p'           : self.getOneRegisterHandler,
-            'P'           : self.setOneRegisterHandler,
-            'qAttached'   : self.attachedHandler,
-            'qOffsets'    : self.offsetsHandler,
-            'qRcmd'       : self.monitorCmdHandler,
-            'qSupported'  : self.supportedHandler,
-            'qfThreadInfo': self.firstThreadInfoHandler,
-            'qsThreadInfo': self.subsequentThreadInfoHandler,
-            'qXfer'       : self.memoryMapHandler,
+            'm'           : self._get_memory_handler,
+            'M'           : self._set_memory_handler,
+            'p'           : self._get_one_register_handler,
+            'P'           : self._set_one_register_handler,
+            'qAttached'   : self._attached_handler,
+            'qOffsets'    : self._offsets_handler,
+            'qRcmd'       : self._monitor_cmd_handler,
+            'qSupported'  : self._supported_handler,
+            'qfThreadInfo': self._first_thread_info_handler,
+            'qsThreadInfo': self._subsequent_thread_info_handler,
+            'qXfer'       : self._memory_map_handler,
           # 'Q'           : general set commands - no relevant cases
           # 'R'           : run command - never used because vRun is supported
-            's'           : self.stepHandler,
-            'S'           : self.stepWithSignalHandler, # signal will be ignored
-            'T'           : self.threadAliveHandler,
-            'vCont'       : self.vcontHandler,
-            'vFlashDone'  : self.vflashDoneHandler,
-            'vFlashErase' : self.vflashEraseHandler,
-            'vFlashWrite' : self.vflashWriteHandler,
-            'vKill'       : self.killHandler,
-            'vRun'        : self.runHandler,
-            'X'           : self.setBinaryMemoryHandler,
-            'z'           : self.removeBreakpointHandler,
-            'Z'           : self.addBreakpointHandler,
+            's'           : self._step_handler,
+            'S'           : self._step_with_signal_handler, # signal will be ignored
+            'T'           : self._thread_alive_handler,
+            'vCont'       : self._vcont_handler,
+            'vFlashDone'  : self._vflash_done_handler,
+            'vFlashErase' : self._vflash_erase_handler,
+            'vFlashWrite' : self._vflash_write_handler,
+            'vKill'       : self._kill_handler,
+            'vRun'        : self._run_handler,
+            'X'           : self._set_binary_memory_handler,
+            'z'           : self._remove_breakpoint_handler,
+            'Z'           : self._add_breakpoint_handler,
             }
 
 
@@ -119,72 +119,76 @@ class GdbHandler():
         Dispatches command to the right handler
         """
         try:
-            self.handler = self.packettypes[cmd]
+            handler = self.packettypes[cmd]
         except (KeyError, IndexError):
             self.logger.debug("Unhandled GDB RSP packet type: %s", cmd)
-            self.sendPacket("")
+            self.send_packet("")
             return
         try:
-            if cmd != 'X' and cmd != 'vFlashWrite': # no binary data
+            if cmd not in {'X', 'vFlashWrite'}: # no binary data in packet
                 packet = packet.decode('ascii')
-            self.handler(packet)
+            handler(packet)
         except (FatalError, PymcuprogNotSupportedError, PymcuprogError) as e:
             self.logger.critical(e)
-            self.sendSignal(SIGABRT)
+            self.send_signal(SIGABRT)
 
-    def extendedRemoteHandler(self, packet):
+    def _extended_remote_handler(self, _):
         """
         '!': GDB tries to switch to extended remote mode and we accept
         """
         self.logger.debug("RSP packet: set exteded remote")
-        self.extended_remote_mode = True
-        self.sendPacket("OK")
+        self._extended_remote_mode = True
+        self.send_packet("OK")
 
-    def stopReasonHandler(self, packet):
+    def _stop_reason_handler(self, _):
         """
         '?': Send reason for last stop: the last signal
         """
         self.logger.debug("RSP packet: ask for last stop reason")
-        if not self.lastSIGVAL: self.lastSIGVAL = NOSIG
-        self.sendPacket("S{:02X}".format(self.lastSIGVAL))
-        self.logger.debug("Reason was %s",self.lastSIGVAL)
+        if not self.last_sigval:
+            self.last_sigval = NOSIG
+        self.send_packet("S{:02X}".format(self.last_sigval))
+        self.logger.debug("Reason was %s",self.last_sigval)
 
-    def continueHandler(self, packet):
+    def _continue_handler(self, packet):
         """
         'c': Continue execution, either at current address or at given address
         """
         self.logger.debug("RSP packet: Continue")
         if not self.mon.is_dw_mode_active():
             self.logger.debug("Cannot start execution because not connected")
-            self.sendDebugMessage("Enable debugWIRE first: 'monitor debugwire enable'")
-            self.sendSignal(SIGHUP)
+            self.send_debug_message("Enable debugWIRE first: 'monitor debugwire enable'")
+            self.send_signal(SIGHUP)
             return
-        if self.mem.isFlashEmpty() and not self.mon.is_noload():
+        if self.mem.is_flash_empty() and not self.mon.is_noload():
             self.logger.debug("Cannot start execution without prior load")
-            self.sendDebugMessage("Load executable first before starting execution")
-            self.sendSignal(SIGILL)
+            self.send_debug_message("Load executable first before starting execution")
+            self.send_signal(SIGILL)
             return
         newpc = None
         if packet:
             newpc = int(packet,16)
             self.logger.debug("Set PC to 0x%X before resuming execution", newpc)
-        self.bp.resumeExecution(newpc)
+        if self.bp.resume_execution(newpc) == SIGABRT:
+            self.send_debug_message("Too many breakpoints set")
+            self.send_signal(SIGABRT)
 
-    def continueWithSignalHandler(self, packet):
+
+    def _continue_with_signal_handler(self, packet):
         """
         'C': continue with signal, which we ignore here
         """
-        self.continueHandler((packet+";").split(";")[1])
-        
-    def detachHandler(self, packet):
+        self._continue_handler((packet+";").split(";")[1])
+
+    def _detach_handler(self, _):
         """
        'D': Detach. All the real housekeeping will take place when the connection is terminated
         """
         self.logger.debug("RSP packet: Detach")
-        self.sendPacket("OK")
+        self.send_packet("OK")
         raise EndOfSession("Session ended by client ('detach')")
 
-    def getRegisterHandler(self, packet):
+    def _get_register_handler(self, _):
         """
         'g': Send the current register values R[0:31] + SREG + SP + PC to GDB
         """
@@ -193,25 +197,27 @@ class GdbHandler():
             regs = self.dbg.register_file_read()
             sreg = self.dbg.status_register_read()
             sp = self.dbg.stack_pointer_read()
-            pc = self.dbg.program_counter_read() << 1 # get PC as word adress and make a byte address
-            regString = ""
+            # get PC as word adress and make a byte address
+            pc = self.dbg.program_counter_read() << 1
+            reg_string = ""
             for reg in regs:
-                regString = regString + format(reg, '02x')
-            sregString = ""
+                reg_string = reg_string + format(reg, '02x')
+            sreg_string = ""
             for reg in sreg:
-                sregString = sregString + format(reg, '02x')
-            spString = ""
+                sreg_string = sreg_string + format(reg, '02x')
+            sp_string = ""
             for reg in sp:
-                spString = spString + format(reg, '02x')
+                sp_string = sp_string + format(reg, '02x')
             pcstring = binascii.hexlify(pc.to_bytes(4,byteorder='little')).decode('ascii')
-            regString = regString + sregString + spString + pcstring
+            reg_string = reg_string + sreg_string + sp_string + pcstring
         else:
-            regString = "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f2000341200000000"
-        self.sendPacket(regString)
-        self.logger.debug("Data sent: %s", regString)
-        
-        
-    def setRegisterHandler(self, packet):
+            reg_string = \
+               "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f2000341200000000"
+        self.send_packet(reg_string)
+        self.logger.debug("Data sent: %s", reg_string)
+
+
+    def _set_register_handler(self, packet):
         """
         'G': Receive new register ( R[0:31] + SREAG + SP + PC) values from GDB
         """
@@ -222,48 +228,49 @@ class GdbHandler():
             self.dbg.register_file_write(newdata[:32])
             self.dbg.status_register_write(newdata[32:33])
             self.dbg.stack_pointer_write(newdata[33:35])
-            self.dbg.program_counter_write((int(binascii.hexlify(bytes(reversed(newdata[35:]))),16)) >> 1)
+            self.dbg.program_counter_write((int(binascii.hexlify(
+                                          bytes(reversed(newdata[35:]))),16)) >> 1)
             self.logger.debug("Setting new register data from GDB: %s", packet)
-        self.sendPacket("OK")
+        self.send_packet("OK")
 
-    def setThreadHandler(self, packet):
+    def _set_thread_handler(self, _):
         """
         'H': set thread id for next operation. Since we only have one, it is always OK
         """
         self.logger.debug("RSP packet: Set current thread")
-        self.sendPacket('OK')
+        self.send_packet('OK')
 
-    def getMemoryHandler(self, packet):
+    def _get_memory_handler(self, packet):
         """
         'm': provide GDB with memory contents
         """
         if not self.mon.is_dw_mode_active():
             self.logger.debug("RSP packet: memory read, but not connected")
-            self.sendPacket("E01")
+            self.send_packet("E01")
             return
         addr = packet.split(",")[0]
         size = packet.split(",")[1]
         isize = int(size, 16)
         self.logger.debug("RSP packet: Reading memory: addr=%s, size=%d", addr, isize)
         if isize == 0:
-            self.sendPacket("OK")
+            self.send_packet("OK")
             return
         data = self.mem.readmem(addr, size)
         if data:
-            dataString = (binascii.hexlify(data)).decode('ascii')
-            self.logger.debug("Data retrieved: %s", dataString)
-            self.sendPacket(dataString)
+            data_string = (binascii.hexlify(data)).decode('ascii')
+            self.logger.debug("Data retrieved: %s", data_string)
+            self.send_packet(data_string)
         else:
             self.logger.error("Cannot access memory for address 0x%s", addr)
-            self.sendPacket("E14")
+            self.send_packet("E14")
 
-    def setMemoryHandler(self, packet):
+    def _set_memory_handler(self, packet):
         """
         'M': GDB sends new data for MCU memory
         """
         if not self.mon.is_dw_mode_active():
             self.logger.debug("RSP packet: Memory write, but not connected")
-            self.sendPacket("E01")
+            self.send_packet("E01")
             return
         addr = packet.split(",")[0]
         size = (packet.split(",")[1]).split(":")[0]
@@ -272,48 +279,50 @@ class GdbHandler():
         data = binascii.unhexlify(data)
         if len(data) != int(size,16):
             self.logger.error("Size of data packet does not fit: %s", packet)
-            self.sendPacket("E15")
+            self.send_packet("E15")
             return
         reply = self.mem.writemem(addr, data)
-        self.sendPacket(reply)
+        self.send_packet(reply)
 
-        
-    def getOneRegisterHandler(self, packet):
+
+    def _get_one_register_handler(self, packet):
         """
         'p': read register and send to GDB
         currently only PC
         """
         if not self.mon.is_dw_mode_active():
             self.logger.debug("RSP packet: read register command, but not connected")
-            self.sendPacket("E01")
+            self.send_packet("E01")
             return
         if packet == "22":
             # GDB defines PC register for AVR to be REG34(0x22)
             # and the bytes have to be given in reverse order (big endian)
             pc = self.dbg.program_counter_read() << 1
             self.logger.debug("RSP packet: read PC command: 0x%X", pc)
-            pcByteString = binascii.hexlify((pc).to_bytes(4,byteorder='little')).decode('ascii')
-            self.sendPacket(pcByteString)
+            pc_byte_string = binascii.hexlify((pc).to_bytes(4,byteorder='little')).decode('ascii')
+            self.send_packet(pc_byte_string)
         elif packet == "21": # SP
-            spByteString = (binascii.hexlify(self.dbg.stack_pointer_read())).decode('ascii')
-            self.logger.debug("RSP packet: read SP command (little endian): 0x%s", spByteString)
-            self.sendPacket(spByteString)
+            sp_byte_string = (binascii.hexlify(self.dbg.stack_pointer_read())).decode('ascii')
+            self.logger.debug("RSP packet: read SP command (little endian): 0x%s", sp_byte_string)
+            self.send_packet(sp_byte_string)
         elif packet == "20": # SREG
-            sregByteString =  (binascii.hexlify(self.dbg.status_register_read())).decode('ascii')
-            self.logger.debug("RSP packet: read SREG command: 0x%s", sregByteString)
-            self.sendPacket(sregByteString)
+            sreg_byte_string =  (binascii.hexlify(self.dbg.status_register_read())).\
+                                    decode('ascii')
+            self.logger.debug("RSP packet: read SREG command: 0x%s", sreg_byte_string)
+            self.send_packet(sreg_byte_string)
         else:
-            regByteString =  (binascii.hexlify(self.dbg.sram_read(int(packet,16), 1))).decode('ascii')
-            self.logger.debug("RSP packet: read Reg%s command: 0x%s", packet, regByteString)
-            self.sendPacket(regByteString)            
-        
-    def setOneRegisterHandler(self, packet):
+            reg_byte_string =  (binascii.hexlify(self.dbg.sram_read(int(packet,16), 1))).\
+                                   decode('ascii')
+            self.logger.debug("RSP packet: read Reg%s command: 0x%s", packet, reg_byte_string)
+            self.send_packet(reg_byte_string)
+
+    def _set_one_register_handler(self, packet):
         """
         'P': set a single register with a new value given by GDB
         """
         if not self.mon.is_dw_mode_active():
             self.logger.debug("RSP packet: write register command, but not connected")
-            self.sendPacket("E01")
+            self.send_packet("E01")
             return
         if packet[0:3] == "22=": # PC
             pc = int(binascii.hexlify(bytearray(reversed(binascii.unhexlify(packet[3:])))),16)
@@ -328,34 +337,35 @@ class GdbHandler():
         else:
             self.logger.debug("RSP packet: write REG%d=%s",int(packet[0:2],16),packet[3:])
             self.dbg.sram_write(int(packet[0:2],16), binascii.unhexlify(packet[3:]))
-        self.sendPacket("OK")
-            
+        self.send_packet("OK")
 
-    def attachedHandler(self,packet):
+
+    def _attached_handler(self, _):
         """
         'qAttached': whether detach or kill will be used when quitting GDB
         """
         self.logger.debug("RSP packet: attached query, will answer '1'")
-        self.sendPacket("1")
+        self.send_packet("1")
 
-    def offsetsHandler(self, packet):
+    def _offsets_handler(self, _):
         """
         'qOffsets': Querying offsets of the different memory areas
         """
         self.logger.debug("RSP packet: offset query, will answer 'Text=000;Data=000;Bss=000'")
-        self.sendPacket("Text=000;Data=000;Bss=000")
+        self.send_packet("Text=000;Data=000;Bss=000")
 
-    def monitorCmdHandler(self, packet):
+    def _monitor_cmd_handler(self, packet):
         """
         'qRcmd': Monitor commands that directly get info or set values in the gdbserver
         """
         payload = packet[1:]
-        self.logger.debug("RSP packet: monitor command: %s",binascii.unhexlify(payload).decode('ascii'))
+        self.logger.debug("RSP packet: monitor command: %s"
+                              ,binascii.unhexlify(payload).decode('ascii'))
         tokens = binascii.unhexlify(payload).decode('ascii').split()
         try:
             response = self.mon.dispatch(tokens)
             if response[0] == 'dwon':
-                self.dw.coldStart(graceful=False, callback=self.sendPowerCycle)
+                self.dw.cold_start(graceful=False, callback=self.send_power_cycle)
             elif response[0] == 'dwoff':
                 self.dw.disable()
             elif response[0] == 'reset':
@@ -371,17 +381,20 @@ class GdbHandler():
             elif 'power q' in response[0]:
                 resp = self.dbg.edbg_protocol.query(EdbgProtocol.EDBG_QUERY_COMMANDS)
                 self.logger.info("Commands: %s", resp)
-            if response[0] == 'livetest':
-                from testcases import runtests
-                runtests()
+            elif 'info' in response[0]:
+                response = ("", response[1].format(dev_name[self.dbg.device_info['device_id']]))
         except (FatalError, PymcuprogNotSupportedError, PymcuprogError) as e:
             self.logger.critical(e)
-            self.sendReplyPacket("Fatal error: %s\nNo execution is possible any longer" % e)
+            self.send_reply_packet("Fatal error: %s\n" % e)
         else:
-            self.sendReplyPacket(response[1])
+            self.send_reply_packet(response[1])
 
 
-    def sendPowerCycle(self):
+    def send_power_cycle(self):
+        """
+        This is a call back function that will try to power-cycle
+        automagically. If unsuccessful, it will ask user to power-cycle.
+        """
         if self.dbg.transport.device.product_string.lower().startswith('medbg'):
             # mEDBG are the only ones it will work with, I believe.
             # I tried to use a try/except construction,
@@ -398,141 +411,150 @@ class GdbHandler():
             time.sleep(0.1)
             self.logger.info("Automatic power-cycling successful")
             return True
-        self.sendDebugMessage("*** Please power-cycle the target system ***")
+        self.send_debug_message("*** Please power-cycle the target system ***")
         return False
-        
-    def supportedHandler(self, packet):
+
+    def _supported_handler(self, _):
         """
-        'qSupported': query for features supported by the gbdserver; in our case packet size and memory map
-        Because this is also the command send after a connection with 'target remote' is made,
+        'qSupported': query for features supported by the gbdserver; in our case 
+        packet size and memory map. Because this is also the command send after a 
+        connection with 'target remote' is made,
         we will try to establish a connection to the debugWIRE target.
         """
-        self.logger.debug("RSP packet: qSupported query, will answer 'PacketSize={0:X};qXfer:memory-map:read+'".format(self.packet_size))
+        self.logger.debug("RSP packet: qSupported query.")
+        self.logger.debug("Will answer 'PacketSize=%X;qXfer:memory-map:read+'",
+                              self.packet_size)
         # Try to start a debugWIRE debugging session
         # if we are already in debugWIRE mode, this will work
         # if not, one has to use the 'monitor debugwire on' command later on
-        if  self.dw.warmStart(graceful=True):
+        if  self.dw.warm_start(graceful=True):
             self.mon.set_dw_mode_active()
         self.logger.debug("dw_mode_active=%d",self.mon.is_dw_mode_active())
-        self.sendPacket("PacketSize={0:X};qXfer:memory-map:read+".format(self.packet_size))
+        self.send_packet("PacketSize={0:X};qXfer:memory-map:read+".format(self.packet_size))
 
-    def firstThreadInfoHandler(self, packet):
+    def _first_thread_info_handler(self, _):
         """
         'qfThreadInfo': get info about active threads
         """
         self.logger.debug("RSP packet: first thread info query, will answer 'm01'")
-        self.sendPacket("m01")
+        self.send_packet("m01")
 
-    def subsequentThreadInfoHandler(self, packet):
+    def _subsequent_thread_info_handler(self, _):
         """
         'qsThreadInfo': get more info about active threads
         """
         self.logger.debug("RSP packet: subsequent thread info query, will answer 'l'")
-        self.sendPacket("l") # the previously given thread was the last one
+        self.send_packet("l") # the previously given thread was the last one
 
-    def memoryMapHandler(self, packet):
+    def _memory_map_handler(self, packet):
         """
         'qXfer:memory-map:read' - provide info about memory map so that the vFlash commands are used
         """
-        if ":memory-map:read" in packet and not self.mon.is_noxml(): 
+        if ":memory-map:read" in packet and not self.mon.is_noxml():
             self.logger.debug("RSP packet: memory map query")
-            map = self.mem.memoryMap()
-            self.sendPacket(map)
-            self.logger.debug("Memory map=%s", map)            
+            mmap = self.mem.memory_map()
+            self.send_packet(mmap)
+            self.logger.debug("Memory map=%s", mmap)
         else:
             self.logger.debug("Unhandled query: qXfer%s", packet)
-            self.sendPacket("")
+            self.send_packet("")
 
-    def stepHandler(self, packet):
+    def _step_handler(self, packet):
         """
         's': single step, perhaps starting at a different address
         """
         self.logger.debug("RSP packet: single-step")
         if not self.mon.is_dw_mode_active():
             self.logger.debug("Cannot single-step because not connected")
-            self.sendDebugMessage("Enable debugWIRE first: 'monitor debugwire on'")
-            self.sendSignal(SIGHUP)
+            self.send_debug_message("Enable debugWIRE first: 'monitor debugwire on'")
+            self.send_signal(SIGHUP)
             return
-        if self.mem.isFlashEmpty() and not self.mon.is_noload():
+        if self.mem.is_flash_empty() and not self.mon.is_noload():
             self.logger.debug("Cannot single-step without prior load")
-            self.sendDebugMessage("Load executable first before starting execution")
-            self.sendSignal(SIGILL)
+            self.send_debug_message("Load executable first before starting execution")
+            self.send_signal(SIGILL)
             return
         newpc = None
         if packet:
             newpc = int(packet,16)
             self.logger.debug("Set PC to 0x%s before single step",newpc)
-        self.sendSignal(self.bp.singleStep(newpc))
+        sig = self.bp.single_step(newpc)
+        if sig == SIGABRT:
+            self.send_debug_message("Too many breakpoints set")
+        self.send_signal(sig)
 
-    def stepWithSignalHandler(self, packet):
+    def _step_with_signal_handler(self, packet):
         """
         'S': single-step with signal, which we ignore here
         """
-        self.stepHandler((packet+";").split(";")[1])
- 
-    def threadAliveHandler(self, packet):
+        self._step_handler((packet+";").split(";")[1])
+
+    def _thread_alive_handler(self, _):
         """
         'T': Is thread still alive? Yes, always!
         """
-        self.logger.debug("RSP packet: thread alive query, will answer 'OK'");
-        self.sendPacket('OK')
+        self.logger.debug("RSP packet: thread alive query, will answer 'OK'")
+        self.send_packet('OK')
 
-    def vcontHandler(self, packet):
+    def _vcont_handler(self, packet):
         """
         'vCont': eversything about execution
         """
         self.logger.debug("RSP packet: vCont")
         if packet == '?': # asks for capabilities
             self.logger.debug("Tell GDB about vCont capabilities: c, C, s, S, r")
-            self.sendPacket("vCont;c;C;s;S;r")
+            self.send_packet("vCont;c;C;s;S;r")
         elif packet[0] == ';':
             if packet[1] in ['c', 'C']:
-                self.continueHandler("")
+                self._continue_handler("")
             elif packet[1] in ['s', 'S']:
-                self.stepHandler("");
+                self._step_handler("")
             elif packet[1] == 'r':
-                range = packet[2:].split(':')[0].split(',')
-                self.sendSignal(self.bp.rangeStep(int(range[0],16), int(range[1],16)))
+                step_range = packet[2:].split(':')[0].split(',')
+                sig = self.bp.range_step(int(step_range[0],16), int(step_range[1],16))
+                if sig == SIGABRT:
+                    self.send_debug_message("Too many breakpoints set")
+                self.send_signal(sig)
             else:
-                self.sendPacket("") # unknown
+                self.send_packet("") # unknown
         else:
-            self.sendPacket("") # unknown
-            
+            self.send_packet("") # unknown
 
-    def vflashDoneHandler(self, packet):
+
+    def _vflash_done_handler(self, _):
         """
-        'vFlashDone': everything is there, now we can start flashing! 
+        'vFlashDone': everything is there, now we can start flashing!
         """
         self.logger.debug("RSP packet: vFlashDone")
-        self.vflashdone = True
+        self._vflashdone = True
         self.logger.info("Starting to flash ...")
         try:
-            self.mem.flashPages()
+            self.mem.flash_pages()
         except:
             self.logger.error("Flashing was unsuccessful")
-            self.sendPacket("E11")            
+            self.send_packet("E11")
             raise
         self.logger.info("Flash done")
-        self.sendPacket("OK")            
-        
-    def vflashEraseHandler(self, packet):
+        self.send_packet("OK")
+
+    def _vflash_erase_handler(self, _):
         """
         'vFlashErase': Since we cannot and need not to erase pages,
         we only use this command to clear the cache when there was a previous
         vFlashDone command.
         """
         self.logger.debug("RSP packet: vFlashErase")
-        if self.vflashdone:
-            self.vflashdone = False
-            self.mem.initFlash() # clear cache
+        if self._vflashdone:
+            self._vflashdone = False
+            self.mem.init_flash() # clear cache
         if self.mon.is_dw_mode_active():
-            if self.mem.isFlashEmpty():
+            if self.mem.is_flash_empty():
                 self.logger.info("Loading executable ...")
-            self.sendPacket("OK")
+            self.send_packet("OK")
         else:
-            self.sendPacket("E01")
-            
-    def vflashWriteHandler(self, packet):
+            self.send_packet("E01")
+
+    def _vflash_write_handler(self, packet):
         """
         'vFlashWrite': chunks of the program data we need to flash
         """
@@ -541,8 +563,8 @@ class GdbHandler():
         addr = int(addrstr, 16)
         self.logger.debug("RSP packet: vFlashWrite starting at 0x%04X", addr)
         #insert new block in flash cache
-        self.mem.storeToCache(addr, data)
-        self.sendPacket("OK")
+        self.mem.store_to_cache(addr, data)
+        self.send_packet("OK")
 
     @staticmethod
     def escape(data):
@@ -565,7 +587,7 @@ class GdbHandler():
     def unescape(data):
         """
         De-escapes binary data from Gdb.
-        
+
         :param: data Bytes-like object with possibly escaped values.
         :return: List of integers in the range 0-255, with all escaped bytes de-escaped.
         """
@@ -583,97 +605,94 @@ class GdbHandler():
 
         return result
 
-    def killHandler(self, packet):
+    def _kill_handler(self, _):
         """
-        'vKill': Kill command. Will be called, when the user requests a 'kill', but also 
+        'vKill': Kill command. Will be called, when the user requests a 'kill', but also
         when in extended-remote mode, when a 'run' is issued. In ordinary remote mode, it
-        will disconnect, in extended-remote it will not, and you can restart or load a modified 
+        will disconnect, in extended-remote it will not, and you can restart or load a modified
         file and run that one.
         """
         self.logger.debug("RSP packet: kill process, will reset CPU")
         if self.mon.is_dw_mode_active():
             self.dbg.reset()
-        self.sendPacket("OK")
-        if not self.extended_remote_mode:
+        self.send_packet("OK")
+        if not self._extended_remote_mode:
             self.logger.debug("Terminating session ...")
             raise EndOfSession
 
-    def runHandler(self, packet):
+    def _run_handler(self, _):
         """
-        'vRun': reset and wait to be started from address 0 
+        'vRun': reset and wait to be started from address 0
         """
         self.logger.debug("RSP packet: run")
         if not self.mon.is_dw_mode_active():
             self.logger.debug("Cannot start execution because not connected")
-            self.sendDebugMessage("Enable debugWIRE first: 'monitor debugwire on'")
-            self.sendSignal(SIGHUP)
+            self.send_debug_message("Enable debugWIRE first: 'monitor debugwire on'")
+            self.send_signal(SIGHUP)
             return
         self.logger.debug("Resetting CPU and wait for start")
         self.dbg.reset()
-        self.sendSignal(SIGTRAP)
+        self.send_signal(SIGTRAP)
 
-    def setBinaryMemoryHandler(self, packet):
+    def _set_binary_memory_handler(self, packet):
         """
         'X': Binary load
         """
         addr = (packet.split(b',')[0]).decode('ascii')
         size = int(((packet.split(b',')[1]).split(b':')[0]).decode('ascii'),16)
         data = self.unescape((packet.split(b':')[1]))
-        self.logger.debug("RSP packet: X, addr=0x%s, length=%d, data=%s" % (addr, size, data))
+        self.logger.debug("RSP packet: X, addr=0x%s, length=%d, data=%s", addr, size, data)
         if not self.mon.is_dw_mode_active() and size > 0:
             self.logger.debug("RSP packet: Memory write, but not connected")
-            self.sendPacket("E01")
+            self.send_packet("E01")
             return
         if len(data) != size:
             self.logger.error("Size of data packet does not fit: %s", packet)
-            self.sendPacket("E15")
+            self.send_packet("E15")
             return
         try:
             reply = self.mem.writemem(addr, bytearray(data))
         except:
             self.logger.error("Loading binary data was unsuccessful")
-            self.sendPacket("E11")
+            self.send_packet("E11")
             raise
-        self.sendPacket(reply)
+        self.send_packet(reply)
 
-    def removeBreakpointHandler(self, packet):
+    def _remove_breakpoint_handler(self, packet):
         """
         'z': Remove a breakpoint
         """
         if not self.mon.is_dw_mode_active():
-            self.sendPacket("E01")
+            self.send_packet("E01")
             return
         breakpoint_type = packet[0]
         addr = packet.split(",")[1]
         self.logger.debug("RSP packet: remove BP of type %s at %s", breakpoint_type, addr)
-        if breakpoint_type == "0" or breakpoint_type == "1":
-            self.bp.removeBreakpoint(int(addr, 16))
-            self.sendPacket("OK")
+        if breakpoint_type in {"0", "1"}:
+            self.bp.remove_breakpoint(int(addr, 16))
+            self.send_packet("OK")
         else:
             self.logger.debug("Breakpoint type %s not supported", breakpoint_type)
-            self.sendPacket("")
+            self.send_packet("")
 
-    def addBreakpointHandler(self, packet):
+    def _add_breakpoint_handler(self, packet):
         """
         'Z': Set a breakpoint
         """
         if not self.mon.is_dw_mode_active():
-            self.sendPacket("E01")
+            self.send_packet("E01")
             return
         breakpoint_type = packet[0]
         addr = packet.split(",")[1]
         self.logger.debug("RSP packet: set BP of type %s at %s", breakpoint_type, addr)
-        length = packet.split(",")[2]
-        if breakpoint_type == "0" or breakpoint_type == "1":
-            if self.bp.insertBreakpoint(int(addr, 16)):
-                self.sendPacket("OK")
-            else:
-                self.sendPacket("E07")
+        if breakpoint_type in {"0", "1"}:
+            self.bp.insert_breakpoint(int(addr, 16))
+            self.send_packet("OK")
         else:
-            self.logger.debug("Breakpoint type %s not supported", breakpoint_type)
-            self.sendPacket("")
+            self.logger.error("Breakpoint type %s not supported", breakpoint_type)
+            self.send_packet("")
 
-    def pollEvents(self):
+    def poll_events(self):
         """
         Checks the AvrDebugger for incoming events (breaks)
         """
@@ -682,65 +701,72 @@ class GdbHandler():
         pc = self.dbg.poll_event()
         if pc:
             self.logger.debug("MCU stopped execution")
-            self.sendSignal(SIGTRAP)
+            self.send_signal(SIGTRAP)
 
-    def pollGdbInput(self):
+    def poll_gdb_input(self):
         """
         Checks whether input from GDB is waiting. If so while singelstepping, we might stop.
         """
-        ready = select.select([self.socket], [], [], 0) # just look, never wait
+        ready = select.select([self._comsocket], [], [], 0) # just look, never wait
         return bool(ready[0])
 
-    def sendPacket(self, packetData):
+    def send_packet(self, packet_data):
         """
         Sends a GDB response packet
         """
-        checksum = sum(packetData.encode("ascii")) % 256
-        message = "$" + packetData + "#" + format(checksum, '02x')
+        checksum = sum(packet_data.encode("ascii")) % 256
+        message = "$" + packet_data + "#" + format(checksum, '02x')
         self.logger.debug("<- %s", message)
-        self.lastmessage = packetData
-        self.socket.sendall(message.encode("ascii"))
+        self._lastmessage = packet_data
+        self._comsocket.sendall(message.encode("ascii"))
 
-    def sendReplyPacket(self, mes):
+    def send_reply_packet(self, mes):
         """
         Send a packet as a reply to a monitor command to be displayed in the debug console
         """
-        self.sendPacket(binascii.hexlify(bytearray((mes+"\n").encode('utf-8'))).decode("ascii").upper())
+        self.send_packet(binascii.hexlify(bytearray((mes+"\n").\
+                                                    encode('utf-8'))).decode("ascii").upper())
 
-    def sendDebugMessage(self, mes):
+    def send_debug_message(self, mes):
         """
         Send a packet that always should be displayed in the debug console when the system
         is in active mode.
         """
-        self.sendPacket('O' + binascii.hexlify(bytearray((mes+"\n").encode('utf-8'))).decode("ascii").upper())
-    
-    def sendSignal(self, signal):
+        self.send_packet('O' + binascii.hexlify(bytearray((mes+"\n").\
+                                                    encode('utf-8'))).decode("ascii").upper())
+
+    def send_signal(self, signal):
         """
         Sends signal to GDB
         """
-        self.lastSIGVAL = signal
+        self.last_sigval = signal
         if signal: # do nothing if None or 0
             if signal in [SIGHUP, SIGILL, SIGABRT]:
-                self.sendPacket("S{:02X}".format(signal))
+                self.send_packet("S{:02X}".format(signal))
                 return
             sreg = self.dbg.status_register_read()[0]
             spl, sph = self.dbg.stack_pointer_read()
-            pc = self.dbg.program_counter_read() << 1 # get PC as word adress and make a byte address
+            # get PC as word adress and make a byte address
+            pc = self.dbg.program_counter_read() << 1
             pcstring = binascii.hexlify(pc.to_bytes(4,byteorder='little')).decode('ascii')
-            stoppacket = "T{:02X}20:{:02X};21:{:02X}{:02X};22:{};thread:1;".format(signal, sreg, spl, sph, pcstring)
-            self.sendPacket(stoppacket)
+            stoppacket = "T{:02X}20:{:02X};21:{:02X}{:02X};22:{};thread:1;".\
+              format(signal, sreg, spl, sph, pcstring)
+            self.send_packet(stoppacket)
 
-    def handleData(self, data):
+    def handle_data(self, data):
+    #pylint: disable=too-many-nested-blocks, too-many-branches
         """
-        Analyze the incomming data stream from GDB. Allow more than one RSP record per packet, although this should
-        not be necessary because each packet needs to be acknowledged by a '+' from us. 
+        Analyze the incomming data stream from GDB. Allow more than one RSP record 
+        per packet, although this should not be necessary because each packet needs 
+        to be acknowledged by a '+' from us.
         """
         while data:
             if data[0] == ord('+'): # ACK
                 self.logger.debug("-> +")
                 data = data[1:]
-                if not data or data[0] not in b'+-': # if no ACKs/NACKs are following, delete last message
-                    self.lastmessage = None
+                # if no ACKs/NACKs are following, delete last message
+                if not data or data[0] not in b'+-':
+                    self._lastmessage = None
             elif data[0] == ord('-'): # NAK, resend last message
                 # remove multiple '-'
                 i = 0
@@ -748,34 +774,34 @@ class GdbHandler():
                     i += 1
                 data = data[i:]
                 self.logger.debug("-> -")
-                if (self.lastmessage):
+                if self._lastmessage:
                     self.logger.debug("Resending packet to GDB")
-                    self.sendPacket(self.lastmessage)
+                    self.send_packet(self._lastmessage)
                 else:
-                    self.sendPacket("")
+                    self.send_packet("")
             elif data[0] == 3: # CTRL-C
                 self.logger.info("CTRL-C")
                 self.dbg.stop()
-                self.sendSignal(SIGINT)
-                #self.socket.sendall(b"+")
+                self.send_signal(SIGINT)
+                #self._comsocket.sendall(b"+")
                 #self.logger.debug("<- +")
                 data = data[1:]
             elif data[0] == ord('$'): # start of message
-                validData = True
+                valid_data = True
                 self.logger.debug('-> %s', data)
                 checksum = (data.split(b"#")[1])[:2]
                 packet_data = (data.split(b"$")[1]).split(b"#")[0]
                 if int(checksum, 16) != sum(packet_data) % 256:
                     self.logger.warning("Checksum Wrong in packet: %s", data)
-                    validData = False
-                if not validData:
-                    self.socket.sendall(b"-")
+                    valid_data = False
+                if not valid_data:
+                    self._comsocket.sendall(b"-")
                     self.logger.debug("<- -")
                 else:
-                    self.socket.sendall(b"+")
+                    self._comsocket.sendall(b"+")
                     self.logger.debug("<- +")
                     # now split into command and data (or parameters) and dispatch
-                    if not (chr(packet_data[0]) in 'vqQ'):
+                    if chr(packet_data[0]) not in {'v', 'q', 'Q'}:
                         i = 1
                     else:
                         for i in range(len(packet_data)+1):
@@ -786,16 +812,17 @@ class GdbHandler():
             else: # ignore character
                 data = data[1:]
 
-class Memory(object):
+class Memory():
+    # pylint: disable=too-many-instance-attributes
     """
-    This class is responsible for access to all kinds of memory, for loading the flash memory, 
+    This class is responsible for access to all kinds of memory, for loading the flash memory,
     and for managing the flash cache.
 
     Flash cache is implemented as a growing bytearray. We start always at 0x0000 and fill empty
-    spaces by 0xFF. _flashmem_start_prog points always to the first adddress from which we need to 
-    programm flash memory. Neither the end of the flash cache nor _flashmem_start_prog need to be 
+    spaces by 0xFF. _flashmem_start_prog points always to the first adddress from which we need to
+    programm flash memory. Neither the end of the flash cache nor _flashmem_start_prog need to be
     aligned with multi_page_size (page_size multiplied by buffers_per_flash_page).
-    When programming, we will restart at a lower adderess or add 0xFF at the end. 
+    When programming, we will restart at a lower adderess or add 0xFF at the end.
     """
 
     def __init__(self, dbg, mon):
@@ -815,20 +842,20 @@ class Memory(object):
         self._eeprom_size = self.dbg.memory_info.memory_info_by_name('eeprom')['size']
         self._flashmem_start_prog = 0
 
-    def initFlash(self):
+    def init_flash(self):
         """
         Initialize flash by emptying it.
         """
         self._flash = bytearray()
         self._flashmem_start_prog = 0
 
-    def isFlashEmpty(self):
+    def is_flash_empty(self):
         """
         Return true if flash cache is empty.
         """
         return len(self._flash) == 0
 
-    def flashFilled(self):
+    def flash_filled(self):
         """
         Return how many bytes have already be filled.
         """
@@ -836,93 +863,95 @@ class Memory(object):
 
     def readmem(self, addr, size):
         """
-        Read a chunk of memory and return a bytestring or bytearray. The parameter addr and size should be
-        hex strings.
+        Read a chunk of memory and return a bytestring or bytearray. 
+        The parameter addr and size should be hex strings.
         """
-        iaddr, method, _ = self.memArea(addr)
+        iaddr, method, _ = self.mem_area(addr)
         isize = int(size, 16)
         return method(iaddr, isize)
 
     def writemem(self, addr, data):
         """
-        Write a chunk of memory and return a reply string. The parameter addr and size should be
-        hex strings.
+        Write a chunk of memory and return a reply string. 
+        The parameter addr and size should be hex strings.
         """
-        iaddr, _, method = self.memArea(addr)
+        iaddr, _, method = self.mem_area(addr)
         if not data:
             return "OK"
         result = method(iaddr, data)
-        if result == False:
+        if not result:
             return "E14"
-        else:
-            return "OK"
+        return "OK"
 
-    def memArea(self, addr):
+    def mem_area(self, addr):
         """
-        This function returns a triple consisting of the real address as an int, the read, and the write method.
-        If illegal address section, report and return (0, lambda *x: bytes(), lambda *x: False) 
+        This function returns a triple consisting of the real address as an int, the read, 
+        and the write method. If illegal address section, report and return 
+        (0, lambda *x: bytes(), lambda *x: False)
         """
-        addrSection = "00"
+        addr_section = "00"
         if len(addr) > 4:
             if len(addr) == 6:
-                addrSection = addr[:2]
+                addr_section = addr[:2]
                 addr = addr[2:]
             else:
-                addrSection = "0" + addr[0]
+                addr_section = "0" + addr[0]
                 addr = addr[1:]
         iaddr = int(addr,16)
-        self.logger.debug("Address section: %s",addrSection)
-        if addrSection == "80": # ram
+        self.logger.debug("Address section: %s",addr_section)
+        if addr_section == "80": # ram
             return(iaddr, self.dbg.sram_read, self.dbg.sram_write)
-        elif addrSection == "81": # eeprom
-            return(iaddr, self.dbg.eeprom_read, self.dbg.eeprom_write) 
-        elif addrSection == "00": # flash
-            return(iaddr, self.flashRead, self.flashWrite)
-        self.logger.error("Illegal memtype in memory access operation at %s: %s", addr, addrSection)
+        if addr_section == "81": # eeprom
+            return(iaddr, self.dbg.eeprom_read, self.dbg.eeprom_write)
+        if addr_section == "00": # flash
+            return(iaddr, self.flash_read, self.flash_write)
+        self.logger.error("Illegal memtype in memory access operation at %s: %s",
+                              addr, addr_section)
         return (0, lambda *x: bytes(), lambda *x: False)
 
-    def flashRead(self, addr, size):
-        """ 
+    def flash_read(self, addr, size):
+        """
         Read flash contents from cache that had been constructed during loading the file.
         It is faster and circumvents the problem that with some debuggers only page-sized
-        access is possible. If there is nothing in the cache or it is explicitly disallowed, 
+        access is possible. If there is nothing in the cache or it is explicitly disallowed,
         fall back to reading the flash page-wise (which is the only way supported by mEDBG).
         """
         self.logger.debug("Trying to read %d bytes starting at 0x%X", size, addr)
         if not self.mon.is_dw_mode_active():
             self.logger.error("Cannot read from memory when DW mode is disabled")
             return bytearray([0xFF]*size)
-        if self.mon.is_cache() and addr + size <= self.flashFilled():
+        if self.mon.is_cache() and addr + size <= self.flash_filled():
             return self._flash[addr:addr+size]
         baseaddr = (addr // self._flash_page_size) * self._flash_page_size
         endaddr = addr + size
         pnum = ((endaddr - baseaddr) +  self._flash_page_size - 1) // self._flash_page_size
         self.logger.debug("No cache, request %d pages starting at 0x%X", pnum, baseaddr)
-        response = bytearray()        
+        response = bytearray()
         for p in range(pnum):
             response +=  self.dbg.flash_read(baseaddr + (p * self._flash_page_size),
                                                   self._flash_page_size)
         self.logger.debug("Response from page read: %s", response)
         response = response[addr-baseaddr:addr-baseaddr+size]
-        return(response)
-    
-    def flashReadWord(self, addr):
+        return response
+
+    def flash_read_word(self, addr):
         """
         Read one word at an even address from flash (LSB first!) and return it as a word value.
         """
-        return(int.from_bytes(self.flashRead(addr, 2), byteorder='little'))
+        return(int.from_bytes(self.flash_read(addr, 2), byteorder='little'))
 
-    def flashWrite(self, addr, data):
+    def flash_write(self, addr, data):
         """
         This writes an abitrary chunk of data to flash. If addr is lower than len(self._flash),
-        the cache is cleared. This should do the right thing when loading is implemented with X-records. 
+        the cache is cleared. This should do the right thing when loading is implemented with
+        X-records.
         """
         if addr < len(self._flash):
-            self.initFlash()
-        self.storeToCache(addr, data)
-        self.flashPages()
+            self.init_flash()
+        self.store_to_cache(addr, data)
+        self.flash_pages()
 
-    def storeToCache(self, addr, data):
+    def store_to_cache(self, addr, data):
         """
         Store chunks into the flash cache. Programming will take place later.
         """
@@ -931,7 +960,7 @@ class Memory(object):
         self._flash.extend(bytearray([0xFF]*(addr - len(self._flash) )))
         self._flash.extend(data)
 
-    def flashPages(self):
+    def flash_pages(self):
         """
         Write pages to flash memory, starting at _flashmem_start_prog up to len(self._flash)-1.
         Since programming takes place in chunks of size self._multi_page_size, beginning and end
@@ -948,18 +977,20 @@ class Memory(object):
             if self.mon.is_fastload():
                 # interestingly, it is faster to read single pages than a multi-page chunk!
                 for p in range(self._multi_buffer):
-                    currentpage += self.dbg.flash_read(pgaddr+(p*self._flash_page_size), self._flash_page_size)
+                    currentpage += self.dbg.flash_read(pgaddr+(p*self._flash_page_size),
+                                                           self._flash_page_size)
             if currentpage[:len(pagetoflash)] == pagetoflash:
                 self.logger.debug("Skip flashing page because already flashed at 0x%X", pgaddr)
             else:
                 self.logger.debug("Flashing now from 0x%X to 0x%X", pgaddr, pgaddr+len(pagetoflash))
-                pagetoflash.extend(bytearray([0xFF]*(self._multi_page_size-len(pagetoflash)))) # fill incomplete page
+                pagetoflash.extend(bytearray([0xFF]*(self._multi_page_size-len(pagetoflash))))
                 flashmemtype = self.dbg.device.avr.memtype_write_from_string('flash')
                 self.dbg.device.avr.write_memory_section(flashmemtype,
                                                             pgaddr,
                                                             pagetoflash,
                                                             self._flash_page_size,
-                                                            allow_blank_skip=(self._multi_buffer == 1))
+                                                            allow_blank_skip=
+                                                             self._multi_buffer == 1)
                 if self.mon.is_verify():
                     readbackpage = bytearray([])
                     for p in range(self._multi_buffer):
@@ -970,9 +1001,9 @@ class Memory(object):
                     if readbackpage != pagetoflash:
                         raise FatalError("Flash verification error on page 0x{:X}".format(pgaddr))
             pgaddr += self._multi_page_size
-        self.flashmem_start_prog = len(self._flash)
-    
-    def memoryMap(self):
+        self._flashmem_start_prog = len(self._flash)
+
+    def memory_map(self):
         """
         Return a memory map in XML format. Include registers, IO regs, and EEPROM in SRAM area
         """
@@ -984,32 +1015,35 @@ class Memory(object):
                               self._flash_start, self._flash_size, self._multi_page_size)
 
 
-class BreakAndExec(object):
+class BreakAndExec():
+    #pylint: disable=too-many-instance-attributes
     """
-    This class manages breakpoints, supports flashwear minimizing execution, and 
+    This class manages breakpoints, supports flashwear minimizing execution, and
     makes interrupt-safe single stepping possible.
     """
 
-    def __init__(self, hwbps, mon, dbg, readFlashWord):
+    def __init__(self, hwbps, mon, dbg, read_flash_word):
         self.mon = mon
         self.dbg = dbg
         self.logger = getLogger('BreakAndExec')
-        self._hwbps = hwbps
-        self._readFlashWord = readFlashWord
-        self._hw = [None]*self._hwbps
-        self._bp = dict()
+        self._hwbps = hwbps # This number includes the implicit HWBP used by run_to
+        self._read_flash_word = read_flash_word
+        self._hw = [-1] + [None]*self._hwbps # note that the entries start at index 1
+        self._bp = {}
         self._bpactive = 0
         self._bstamp = 0
-        self._bigmem = self.dbg.memory_info.memory_info_by_name('flash')['size'] > 128*1024 # more than 128 MB
-        self._rangeStart = 0
-        self._rangeStop = 0
-        self._rangeWord = []
-        self._rangeExit = set()
+        # more than 128 MB:
+        self._bigmem = self.dbg.memory_info.memory_info_by_name('flash')['size'] > 128*1024
+        self._range_start = 0
+        self._range_end = 0
+        self._range_word = []
+        self._range_branch = []
+        self._range_exit = set()
         if self._bigmem:
             raise FatalError("Cannot deal with address spaces larger than 128 MB")
 
 
-    def insertBreakpoint(self, address):
+    def insert_breakpoint(self, address):
         """
         Generate a new breakpoint at given address, do not allocate flash or hwbp yet
         Will return False if no breakpoint can be set.
@@ -1017,40 +1051,34 @@ class BreakAndExec(object):
         """
         if address % 2 != 0:
             self.logger.error("Breakpoint at odd address: 0x%X", address)
-            return False
+            return
         if self.mon.is_old_exec():
             self.dbg.software_breakpoint_set(address)
-            return True
+            return
         if address in self._bp: # bp already set, needs to be activated
             self.logger.debug("Already existing BP at 0x%X will be re-activated",address)
-            if not self._bp[address]['active']: # if already active, ignore
-                if self._bpactive >= self._hwbps and self.mon.is_onlyhwbps():
-                    self.logger.debug("Cannot set breakpoint at 0x%X because there are too many", address)
-                    return False
+            if not self._bp[address]['active']:
                 self._bp[address]['active'] = True
                 self._bpactive += 1
                 self.logger.debug("Set BP at 0x%X to active", address)
             else:
-                self.logger.debug("There is already a BP at 0x%X active", address)
-            return True
-
+                # if already active, ignore
+                self.logger.debug("There is already an active BP at 0x%X", address)
+            return
         self.logger.debug("New BP at 0x%X", address)
-        if self._bpactive >= self._hwbps and self.mon.is_onlyhwbps():
-            self.logger.error("Too many HWBPs requested. No BP at: 0x%X", address)
-            return False
-        opcode = self._readFlashWord(address)
-        secondword = self._readFlashWord(address+2)
+        opcode = self._read_flash_word(address)
+        secondword = self._read_flash_word(address+2)
         self._bstamp += 1
-        self._bp[address] =  {'inuse' : True, 'active': True, 'inflash': False, 'hwbp' : None,
-                                 'opcode': opcode, 'secondword' : secondword, 'timestamp' : self._bstamp }
+        self._bp[address] =  {'inuse' : True, 'active': True, 'inflash': False,
+                                  'hwbp' : None, 'opcode': opcode,
+                                  'secondword' : secondword, 'timestamp' : self._bstamp }
         self.logger.debug("New BP at 0x%X: %s", address,  self._bp[address])
         self._bpactive += 1
         self.logger.debug("Now %d active BPs", self._bpactive)
-        return True
 
-    def removeBreakpoint(self, address):
+    def remove_breakpoint(self, address):
         """
-        Will mark a breakpoint as non-active, but it will stay in flash memory.
+        Will mark a breakpoint as non-active, but it will stay in flash memory or marked as a hwbp.
         This method is called immmediately after execution is stopped.
         """
         if address % 2 != 0:
@@ -1058,7 +1086,7 @@ class BreakAndExec(object):
             return
         if self.mon.is_old_exec():
             self.dbg.software_breakpoint_clear(address)
-            return True
+            return
         if not (address in self._bp) or not self._bp[address]['active']:
             self.logger.debug("BP at 0x%X was removed before", address)
             return # was already removed before
@@ -1067,109 +1095,159 @@ class BreakAndExec(object):
         self.logger.debug("BP at 0x%X is now inactive", address)
         self.logger.debug("Only %d BPs are now active", self._bpactive)
 
-    def updateBreakpoints(self):
+    def update_breakpoints(self, reserved):
         """
-        This is called directly before execution is started. It will remove inactive breakpoints,
-        will assign the hardware breakpoints to the most recently added breakpoints, and
-        request to set active breakpoints into flash, if they not there already.
+        This is called directly before execution is started. It will remove 
+        inactive breakpoints, will assign the hardware breakpoints to the most 
+        recently added breakpoints, and request to set active breakpoints into flash, 
+        if they not there already. The reserved argument states how many HWBPs should 
+        be reserved for single- or range-stepping. The method will return False
+        when at least one BP cannot be activated due to resource restrictions 
+        (e.g., not enough HWBPs).
         """
-        # remove inactive BPs
+        # remove inactive BPs and de-allocate BPs that are now forbidden
+        if not self.remove_inactive_and_deallocate_forbidden_bps(reserved):
+            return False
         self.logger.debug("Updating breakpoints before execution")
-        for a in list(self._bp.keys()):
-            if self.mon.is_onlyswbps() and self._bp[a]['hwbp']:
-                self.logger.debug("Removing HWBP at 0x%X  because only SWBPs allowed", a)
-                self._bp[a]['hwbp'] = None
-                self._hw = [None]*self._hwbps
-            if not self._bp[a]['active']:
-                self.logger.debug("BP at 0x%X is not active anymore", a)
-                if self._bp[a]['inflash']:
-                    self.logger.debug("Removed as a SW BP")
-                    self.dbg.software_breakpoint_clear(a)
-                if self._bp[a]['hwbp']:
-                    self.logger.debug("Removed as a HW BP")
-                    self._hw[self._bp[a]['hwbp']-1] = None
-                del self._bp[a]
         # all remaining BPs are active
         # assign HWBPs to the most recently introduced BPs
-        # but take into account the possibility that hardware breakpoints are not allowed
+        # take into account the possibility that hardware breakpoints are not allowed or reserved
         sortedbps = sorted(self._bp.items(), key=lambda entry: entry[1]['timestamp'], reverse=True)
         self.logger.debug("Sorted BP list: %s", sortedbps)
-        for h in range(min(self._hwbps*(1-self.mon.is_onlyswbps()),len(sortedbps))):
-            self.logger.debug("Consider BP at 0x%X", sortedbps[0][0])
-            if sortedbps[h][1]['hwbp'] or sortedbps[h][1]['inflash']:
-                self.logger.debug("BP at 0x%X is already assigned, either HWBP or SWBP", sortedbps[h][0])
-                continue
+        for hix in range(min((self._hwbps-reserved)*(1-self.mon.is_onlyswbps()),len(sortedbps))):
+            h = sortedbps[hix][0]
+            hbp = sortedbps[hix][1]
+            self.logger.debug("Consider BP at 0x%X", h)
+            if hbp['hwbp'] or hbp['inflash']:
+                self.logger.debug("BP at 0x%X is already assigned, either HWBP or SWBP", h)
+                break # then all older BPs are already allocated!
             if None in self._hw: # there is still an available hwbp
                 self.logger.debug("There is still a free HWBP at index: %s", self._hw.index(None))
-                self._bp[sortedbps[h][0]]['hwbp'] = self._hw.index(None)+1
-                self._hw[self._hw.index(None)] = sortedbps[h][0]
-            else: # steal hwbp from oldest
+                hbp['hwbp'] = self._hw.index(None)
+                self._hw[self._hw.index(None)] = h
+                if hbp['hwbp'] and hbp['hwbp'] > 1:
+                    self.logger.error("Trying to set non-existant HWBP %s", hbp['hwbp'])
+            else: # steal hwbp from oldest HWBP
                 self.logger.debug("Trying to steal HWBP")
                 stealbps = sorted(self._bp.items(), key=lambda entry: entry[1]['timestamp'])
-                for s in range(len(stealbps)):
-                    if stealbps[s][1]['hwbp']:
-                        self.logger.debug("BP at 0x%X is a HWBP", stealbps[s][0])
-                        self._bp[sortedbps[h][0]]['hwbp'] = stealbps[s][1]['hwbp']
-                        self.logger.debug("Now BP at 0x%X is the HWP", sortedbps[h][0])
-                        self._hw[stealbps[s][1]['hwbp']-1] = sortedbps[h][0]
-                        self._bp[stealbps[s][0]]['hwbp'] = None
+                for s, sbp in stealbps:
+                    if sbp['hwbp']:
+                        self.logger.debug("BP at 0x%X is a HWBP", s)
+                        if sbp['hwbp'] > 1:
+                            self.logger.error("Trying to clear non-existant HWBP %s", sbp['hwbp'])
+                            # self.dbg.hardware_breakpoint_clear(steal[s][1]['hwbp']-1)
+                            # not yet implemented
+                            return False
+                        hbp['hwbp'] = sbp['hwbp']
+                        self.logger.debug("Now BP at 0x%X is the HWP", h)
+                        self._hw[hbp['hwbp']] = h
+                        sbp['hwbp'] = None
                         break
-        # now request SW BPs, if they are not already in flash, and set the HW registers
-        for a in self._bp:
-            if self._bp[a]['inflash']:
-                self.logger.debug("BP at 0x%X is already in flash", a)
-                continue # already in flash
-            if self._bp[a]['hwbp'] and self._bp[a]['hwbp'] > 1:
-                self.logger.error("This case should not happen with debugWIRE!")
-                #set HW BP, the '1' case will be handled by run_to
-                # this is future implementation when JTAG or UPDI enter the picture
-                continue
-            if not self._bp[a]['inflash'] and not self._bp[a]['hwbp']:
+        # now set SWBPs, if they are not already in flash
+        for a, bp in self._bp.items():
+            if not bp['inflash'] and not bp['hwbp']:
+                if self.mon.is_onlyhwbps():
+                    return False # we are not allowed to set a software breakpoint
                 self.logger.debug("BP at 0x%X will now be set as a SW BP", a)
                 self.dbg.software_breakpoint_set(a)
-                self._bp[a]['inflash'] = True
+                bp['inflash'] = True
+        return True
 
-    def cleanupBreakpoints(self):
+    def remove_inactive_and_deallocate_forbidden_bps(self, reserved):
+        """
+        Remove all inactive BPs and deallocate BPs that are forbidden 
+        (after changing BP preference). Return False if a non-existant 
+        HWBP shall be cleared.
+        """
+        self.logger.debug("Deallocate forbidden BPs and remove inactive ones")
+        for a, bp in list(self._bp.items()):
+            if self.mon.is_onlyswbps() and bp['hwbp']: # only SWBPs allowed
+                self.logger.debug("Removing HWBP at 0x%X  because only SWBPs allowed.", a)
+                if bp['hwbp'] > 1: # this is a real HWBP
+                    # self.dbg.hardware_breakpoint_clear(self._bp[a]['hwbp']-1)
+                    # not yet implemented
+                    self.logger.error("Trying to clear non-existant HWBP %s", bp['hwbp'])
+                    return False
+                bp['hwbp'] = None
+                self._hw = [-1] + [None]*self._hwbps # entries start at 1
+            if self.mon.is_onlyhwbps() and bp['inflash']: # only HWBPs allowed
+                self.logger.debug("Removing SWBP at 0x%X  because only HWBPs allowed", a)
+                bp['inflash'] = False
+                self.dbg.software_breakpoint_clear(a)
+            # deallocate HWBP
+            if reserved > 0 and self._bp[a]['hwbp'] and self._bp[a]['hwbp'] <= reserved:
+                if bp['hwbp'] > 1: # this is a real HWBP
+                    # self.dbg.hardware_breakpoint_clear(self._bp[a]['hwbp']-1)
+                    # not yet implemented
+                    self.logger.error("Trying to clear non-existant HWBP %s",
+                                          bp['hwbp'])
+                    return False
+                self._hw[bp['hwbp']] = None
+                bp['hwbp'] = None
+            if not bp['active']: # delete inactive BP
+                self.logger.debug("BP at 0x%X is not active anymore", a)
+                if bp['inflash']:
+                    self.logger.debug("Removed as a SWBP")
+                    self.dbg.software_breakpoint_clear(a)
+                if bp['hwbp']:
+                    self.logger.debug("Removed as a HWBP")
+                    if bp['hwbp'] > 1: # this is a real HWBP
+                        # self.dbg.hardware_breakpoint_clear(self._bp[a]['hwbp']-1)
+                        # not yet implemented
+                        self.logger.error("Trying to clear non-existant HWBP %s",
+                                              bp['hwbp'])
+                        return False
+                    self._hw[bp['hwbp']] = None
+                self.logger.debug("BP at 0x%X will now be deleted", a)
+                del self._bp[a]
+        return True
+
+    def cleanup_breakpoints(self):
         """
         Remove all breakpoints from flash
         """
-        ### You need to cleanup also the corresponding HW BPs
         self.logger.info("Deleting all breakpoints ...")
-        self._hw = [None for x in range(self._hwbps)]
+        self._hw = [-1] + [None for x in range(self._hwbps)]
+        # self.dbg.hardware_breakpoint_clear_all() # not yet implemented
         self.dbg.software_breakpoint_clear_all()
         self._bp = {}
         self._bpactive = 0
 
-    def resumeExecution(self, addr):
+    def resume_execution(self, addr):
         """
         Start execution at given addr (byte addr). If none given, use the actual PC.
-        Update breakpoints in memory and the HWBP. 
+        Update breakpoints in memory and the HWBP. Return SIGABRT if not enough break points.
         """
-        self.updateBreakpoints()
+        if not self.update_breakpoints(0):
+            return SIGABRT
         if addr:
             self.dbg.program_counter_write(addr>>1)
         else:
             addr = self.dbg.program_counter_read() << 1
         if self.mon.is_old_exec():
             self.dbg.run()
-            return
-        if self._hw[0] != None:
-            self.logger.debug("Run to cursor at 0x%X starting at 0x%X", self._hw[0], addr)
-            self.dbg.run_to(self._hw[0]) # according to docu, it is the word address, but in reality it is the byte address!
+            return None
+        if self._hw[1] is not None:
+            self.logger.debug("Run to cursor at 0x%X starting at 0x%X", self._hw[1], addr)
+            # according to docu, it is the word address, but in reality it is the byte address!
+            self.dbg.run_to(self._hw[1])
         else:
             self.logger.debug("Now start executing at 0x%X without HWBP", addr)
             self.dbg.run()
         return None
 
-    def singleStep(self, addr):
+    def single_step(self, addr):
         """
-        Perform a single step. This can mean to simulate a two-word instruction or ask the hardware debugger
-        to do a single step. 
-        If mon.safe is true, it means that we will make every effort to not end up in the interrupt vector table. 
-        For all straight-line instructions, we will use the hardware breakpoint to break after one step.
-        If an interrupt occurs, we may break in the ISR, if there is a breakpoint, or we will not notice it at all.
-        For all remaining instruction (except those branching on the I-bit), we clear the I-bit before and set it 
-        afterwards (if necessary). For those branching on the I-Bit, we will evaluate and then set the hardware BP. 
+        Perform a single step. If at the current location, there is a software breakpoint, 
+        we simulate a two-word instruction or ask the hardware debugger to do a single step 
+        if it is a one-word instruction. The simulation saves two flash reprogramming operations.
+        If mon._safe is true, it means that we will make every effort to not end up in the 
+        interrupt vector table. For all straight-line instructions, we will use the hardware 
+        breakpoint to break after one step. If an interrupt occurs, we may break in the ISR, 
+        if there is a breakpoint, or we will not notice it at all. For all remaining instruction 
+        (except those branching on the I-bit), we clear the I-bit before and set it
+        afterwards (if necessary). For those branching on the I-Bit, we will evaluate and 
+        then set the hardware BP.
         """
         if addr:
             self.dbg.program_counter_write(addr>>1)
@@ -1179,41 +1257,41 @@ class BreakAndExec(object):
         if self.mon.is_old_exec():
             self.dbg.step()
             return SIGTRAP
-        self.updateBreakpoints()
-        # if there is a two word instruction and a SWBP at the place where we want to step, simulate!
+        if not self.update_breakpoints(1):
+            return SIGABRT
+        # if there is a two word instruction and
+        # a SWBP at the place where we want to step, simulate!
         if (addr in self._bp and self._bp[addr]['inflash']
-                and self.twoWordInstr(self._bp[addr]['opcode'])):
+                and self.two_word_instr(self._bp[addr]['opcode'])):
             self.logger.debug("Two-word instruction at SWBP")
-            addr = self.simTwoWordInstr(self._bp[addr]['opcode'], self._bp[addr]['secondword'], addr)
+            addr = self.sim_two_word_instr(self._bp[addr]['opcode'],
+                                               self._bp[addr]['secondword'], addr)
             self.logger.debug("New PC(byte addr)=0x%X, return SIGTRAP", addr)
             self.dbg.program_counter_write(addr>>1)
             return SIGTRAP
         # if stepping is unsafe, just use the AVR stepper
-        if self.mon.is_safe() == False:
+        if not self.mon.is_safe():
             self.logger.debug("Use AVR stepper, return SIGTRAP")
             self.dbg.step()
             return SIGTRAP
         # now we have to do the dance using the HWBP or masking the I-bit
-        opcode = self._readFlashWord(addr)
+        opcode = self._read_flash_word(addr)
         self.logger.debug("Interrupt-safe stepping begins here")
-        if self.mon.is_onlyhwbps() and self._bpactive >= self._hwbps: # all HWBPs in use
-            self.logger.error("We need a HWBP for single-stepping, but all are in use: SIGABRT")
-            return SIGABRT
-        self.stealHWBP0()
         destination = None
         # compute destination for straight-line instructions and branches on I-Bit
-        if not self.branchInstr(opcode):
-            destination = addr + 2 + 2*int(self.twoWordInstr(opcode))
+        if not self.branch_instr(opcode):
+            destination = addr + 2 + 2*int(self.two_word_instr(opcode))
             self.logger.debug("This is not a branch instruction. Destination=0x%X", destination)
-        if self.branchOnIBit(opcode):
+        if self.branch_on_ibit(opcode):
             ibit = bool(self.dbg.status_register_read()[0] & 0x80)
-            destination = self.computeDestinationOfIBranch(opcode, ibit, addr)
+            destination = self.compute_destination_of_ibranch(opcode, ibit, addr)
             self.logger.debug("Branching on I-Bit. Destination=0x%X", destination)
-        if destination != None:
+        if destination is not None:
             self.logger.debug("Run to cursor..., return None")
             self.dbg.run_to(destination)
             return None
-        # for the remaining branch instructions, clear I-bit before and set it afterwards (if it was on before)
+        # for the remaining branch instructions,
+        # clear I-bit before and set it afterwards (if it was on before)
         self.logger.debug("Remaining branch instructions")
         sreg = self.dbg.status_register_read()[0]
         self.logger.debug("sreg=0x%X", sreg)
@@ -1231,141 +1309,147 @@ class BreakAndExec(object):
         self.logger.debug("Returning with SIGTRAP")
         return SIGTRAP
 
-    def stealHWBP0(self):
-        if (self._hw[0]): # steal HWBP0
-            self.logger.debug("Steal HWBP0 from BP at 0x%X", self._hw[0])
-            self._bp[self._hw[0]]['hwbp'] = None
-            self._bp[self._hw[0]]['inflash'] = True
-            self.dbg.software_breakpoint_set(self._hw[0])
-            self._hw[0] = None
 
-
-    def rangeStep(self, start, end):
+    def range_step(self, start, end):
         """
         range stepping: Break only if we leave the interval start-end. If there is only
         one exit point, we watch that. If it is an inside point (e.g., RET), we single-step on it.
         Otherwise, we break at each branching point and single-step this branching instruction.
         In principle this can be generalized to n exit points (n being the number of hardware BPs).
         """
-        self.logger.debug("Range stepping from 0x%X to 0x%X" % (start, end))
-        if not self.mon.is_range():
+        #pylint: disable=too-many-return-statements
+        self.logger.debug("Range stepping from 0x%X to 0x%X", start, end)
+        if not self.mon.is_range() or self.mon.is_old_exec():
             self.logger.debug("Range stepping forbidden")
-            return self.singleStep(None)
+            return self.single_step(None)
         if start%2 != 0 or end%2 != 0:
             self.logger.error("Range addresses in range stepping are ill-formed")
-            return self.singleStep(None)
-        if self.mon.is_onlyhwbps() and self._bpactive >= self._hwbps: # all HWBPs in use
-            self.logger.error("We need a HWBP for single-stepping, but all are in use: SIGABRT")
+            return self.single_step(None)
+        if start == end:
+            self.logger.debug("Empty range: Simply single step")
+            return self.single_step(None)
+        self.build_range(start, end)
+        reservehwbps = len(self._range_exit)
+        if reservehwbps > self._hwbps or self.mon.is_onlyhwbps():
+            reservehwbps = 1
+        if not self.update_breakpoints(reservehwbps):
             return SIGABRT
-        self.stealHWBP0()
-        self.updateBreakpoints()
-        self.buildRange(start, end)
         addr = self.dbg.program_counter_read() << 1
-        if addr in self._rangeExit: # possible exit point inside range
-            return(self.singleStep(None))
-        if len(self._rangeExit) == 1: # only one exit point overall
+        if addr < start or addr >= end: # starting outside of range, should not happen!
+            self.logger.error("PC 0x%X outside of range boundary", addr)
+            return self.single_step(None)
+        if addr in self._range_exit: # starting at possible exit point inside range
+            return self.single_step(None)
+        if len(self._range_exit) == reservehwbps: # we can cover all exit points!
             # if more HWBPs, one could use them here!
             # #MOREHWBPS
-            self.dbg.run_to(list(self._rangeExit)[0])
+            self.dbg.run_to(list(self._range_exit)[0]) # this covers only 1 exit point!
             return None
-        if addr in self._rangeBranch:
-            return(self.singleStep(None))
-        for i in range(len(self._rangeBranch)):
-            if addr < self._rangeBranch[i] :
-                self.dbg.run_to(self._rangeBranch[i])
+        if addr in self._range_branch: # if branch point, single-step
+            return self.single_step(None)
+        for b in self._range_branch:   # otherwise search for next branch point and stop there
+            if addr < b:
+                self.dbg.run_to(b)
                 return None
-        return(self.singleStep(None))
+        return self.single_step(None)
 
-    def buildRange(self, start, end):
+    def build_range(self, start, end):
+        #pylint: disable=too-many-branches
         """
         Collect all instructions in the range and anaylze them. Find all points, where
-        an instruction possibly leaves the range. This includes the first instruction 
-        after the range, provided it is reachable. These points are remembered in 
-        self._rangeExit. If the number of exits is less or equal than the number of 
+        an instruction possibly leaves the range. This includes the first instruction
+        after the range, provided it is reachable. These points are remembered in
+        self._range_exit. If the number of exits is less than or equal to the number of
         hardware BPs, then one can check for all them. In case of DW this number is one.
         However, this is enough for handling _delay_ms(_). In all other cases, we stop at all
-        branching instructions, memorized in self._rangeBranch, and single-step them.
+        branching instructions, memorized in self._range_branch, and single-step them.
         """
-        if start == self._rangeStart and end == self._rangeEnd:
+        if start == self._range_start and end == self._range_end:
             return # previously analyzed
-        self._rangeWord = []
-        self._rangeInstr = []
-        self._rangeExit = set()
-        self._rangeBranch = []
-        self._rangeStart = start
-        self._rangeEnd = end
+        self._range_word = []
+        self._range_exit = set()
+        self._range_branch = []
+        self._range_start = start
+        self._range_end = end
         for a in range(start, end+2, 2):
-            self._rangeWord += [ self._readFlashWord(a) ]
+            self._range_word += [ self._read_flash_word(a) ]
         i = 0
-        while i < len(self._rangeWord) - 1:
+        while i < len(self._range_word) - 1:
             dest = []
-            opcode = self._rangeWord[i]
-            secondword = self._rangeWord[i+1]
-            if self.branchInstr(opcode):
-                self._rangeBranch += [ start + (i * 2) ]
-            if self.twoWordInstr(opcode):
-                if self.branchInstr(opcode): # JMP and CALL
+            opcode = self._range_word[i]
+            secondword = self._range_word[i+1]
+            if self.branch_instr(opcode):
+                self._range_branch += [ start + (i * 2) ]
+            if self.two_word_instr(opcode):
+                if self.branch_instr(opcode): # JMP and CALL
                     dest = [ secondword << 1 ]
                 else: # STS and LDS
                     dest = [ start + (i + 2) * 2 ]
             else:
-                if not self.branchInstr(opcode): # straight-line ops
+                if not self.branch_instr(opcode): # straight-line ops
                     dest = [start + (i + 1) * 2]
-                elif self.skipOperation(opcode): # CPSE, SBIC, SBIS, SBRC, SBRS
+                elif self.skip_operation(opcode): # CPSE, SBIC, SBIS, SBRC, SBRS
                     dest = [start + (i + 1) * 2,
-                               start + (i + 2 + self.twoWordInstr(secondword)) * 2]
-                elif self.condBranchOperation(opcode): # BRBS, BRBC
+                               start + (i + 2 + self.two_word_instr(secondword)) * 2]
+                elif self.cond_branch_operation(opcode): # BRBS, BRBC
                     dest = [start + (i + 1) * 2,
-                                self.computePossibleDestinationOfBranch(opcode, start + (i * 2))]
-                elif self.relativeBranchOperation(opcode): # RJMP, RCALL
-                    dest = [start + (i + 1) * 2,
-                                self.computeDestinationOfRelativeBranch(opcode, start + (i * 2))]
+                                self.compute_possible_destination_of_branch(opcode,
+                                                                                start + (i * 2)) ]
+                elif self.relative_branch_operation(opcode): # RJMP, RCALL
+                    dest = [ self.compute_destination_of_relative_branch(opcode, start + (i * 2)) ]
                 else: # IJMP, EIJMP, RET, ICALL, RETI, EICALL
                     dest = [ -1 ]
-            self.logger.debug("Dest at 0x%X: %s" % (start + i*2, [hex(x) for x in dest]))
+            self.logger.debug("Dest at 0x%X: %s", start + i*2, [hex(x) for x in dest])
             if -1 in dest:
-                self._rangeExit.add(start + (i * 2))
+                self._range_exit.add(start + (i * 2))
             else:
-                self._rangeExit = self._rangeExit.union([ a for a in dest if a < start or a >= end ])
-            i += 1 + self.twoWordInstr(opcode)
-        self._rangeBranch += [ end ]
-        self.logger.debug("Exit points: %s", {hex(x) for x in self._rangeExit})
-        self.logger.debug("Branch points: %s", [hex(x) for x in self._rangeBranch])
+                self._range_exit = self._range_exit.union([ a for a in dest
+                                                                if a < start or a >= end ])
+            i += 1 + self.two_word_instr(opcode)
+        self._range_branch += [ end ]
+        self.logger.debug("Exit points: %s", {hex(x) for x in self._range_exit})
+        self.logger.debug("Branch points: %s", [hex(x) for x in self._range_branch])
 
     @staticmethod
-    def branchInstr(opcode):
-        if (opcode & 0xFC00) == 0x1000: # CPSE
-            return True
-        if (opcode & 0xFFEF) == 0x9409: # IJMP / EIJMP
-            return True
-        if (opcode & 0xFFEE) == 0x9508: # RET, ICALL, RETI, EICALL
-            return True
-        if (opcode & 0xFE0C) == 0x940C: # CALL, JMP
-            return True
-        if (opcode & 0xFD00) == 0x9900: # SBIC, SBIS
-            return True
-        if (opcode & 0xE000) == 0xC000: # RJMP, RCALL
-            return True
-        if (opcode & 0xF800) == 0xF000: # BRBS, BRBC
-            return True
-        if (opcode & 0xFC08) == 0xFC00: # SBRC, SBRS
+    def branch_instr(opcode):
+        """
+        Returns True iff it is a branch instruction
+        """
+        #pylint: disable=too-many-boolean-expressions)
+        if (((opcode & 0xFC00) == 0x1000) or # CPSE
+            ((opcode & 0xFFEF) == 0x9409) or # IJMP / EIJMP
+            ((opcode & 0xFFEE) == 0x9508) or # RET, ICALL, RETI, EICALL
+            ((opcode & 0xFE0C) == 0x940C) or # CALL, JMP
+            ((opcode & 0xFD00) == 0x9900) or # SBIC, SBIS
+            ((opcode & 0xE000) == 0xC000) or # RJMP, RCALL
+            ((opcode & 0xF800) == 0xF000) or # BRBS, BRBC
+            ((opcode & 0xFC08) == 0xFC00)): # SBRC, SBRS
             return True
         return False
 
     @staticmethod
-    def relativeBranchOperation(opcode):
+    def relative_branch_operation(opcode):
+        """
+        Returns True iff it is a branch instruction with relative addressing mode
+        """
         if (opcode & 0xE000) == 0xC000: # RJMP, RCALL
             return True
         return False
 
     @staticmethod
-    def computeDestinationOfRelativeBranch(opcode, addr):
+    def compute_destination_of_relative_branch(opcode, addr):
+        """
+        Computes branch destination for instructions with relative addressing mode
+        """
         rdist = opcode & 0x0FFF
         tsc = rdist - int((rdist << 1) & 2**12)
         return addr + 2 + (tsc*2)
 
     @staticmethod
-    def skipOperation(opcode):
+    def skip_operation(opcode):
+        """
+        Returns True iff instruction is a skip instruction
+        """
         if (opcode & 0xFC00) == 0x1000: # CPSE
             return True
         if (opcode & 0xFD00) == 0x9900: # SBIC, SBIS
@@ -1375,39 +1459,57 @@ class BreakAndExec(object):
         return False
 
     @staticmethod
-    def condBranchOperation(opcode):
+    def cond_branch_operation(opcode):
+        """
+        Returns True iff instruction is a conditional branch instruction
+        """
         if (opcode & 0xF800) == 0xF000: # BRBS, BRBC
             return True
         return False
 
     @staticmethod
-    def branchOnIBit(opcode):
+    def branch_on_ibit(opcode):
+        """
+        Returns True iff instruction is a conditional branch instruction on the I-bit
+        """
         return (opcode & 0xF807) == 0xF007 # BRID, BRIE
 
     @staticmethod
-    def computePossibleDestinationOfBranch(opcode, addr):
-        rdist = ((opcode >> 3) & 0x007F)
+    def compute_possible_destination_of_branch(opcode, addr):
+        """
+        Computes branch destination address for conditional branch instructions
+        """
+        rdist = (opcode >> 3) & 0x007F
         tsc = rdist - int((rdist << 1) & 2**7) # compute twos complement
         return addr + 2 + (tsc*2)
 
 
     @staticmethod
-    def computeDestinationOfIBranch(opcode, ibit, addr):
+    def compute_destination_of_ibranch(opcode, ibit, addr):
+        """
+        Interprets BRIE/BRID instructions and computes the target instruction.
+        This is used to simulate the execution of theses two instructions.
+        """
         branch = ibit ^ bool(opcode & 0x0400 != 0)
         if not branch:
             return addr + 2
-        else:
-            return self.computePossibleDestinationOfBranch(opcode, addr)
+        return BreakAndExec.compute_possible_destination_of_branch(opcode, addr)
 
     @staticmethod
-    def twoWordInstr(opcode):
-        return(((opcode & ~0x01F0) == 0x9000) or ((opcode & ~0x01F0) == 0x9200) or
-                ((opcode & 0x0FE0E) == 0x940C) or ((opcode & 0x0FE0E) == 0x940E))
-
-    def simTwoWordInstr(self, opcode, secondword, addr):
+    def two_word_instr(opcode):
         """
-        Simulate a two-word instruction with opcode and 2nd word secondword. Update all registers (except PC)
-        and return the (byte-) address where execution will continue.
+        Returns True iff instruction is a two-word intruction
+        """
+        return(((opcode & ~0x01F0) == 0x9000) or # lds
+               ((opcode & ~0x01F0) == 0x9200) or # sts
+               ((opcode & 0x0FE0E) == 0x940C) or # jmp
+               ((opcode & 0x0FE0E) == 0x940E))   # call
+
+    def sim_two_word_instr(self, opcode, secondword, addr):
+        """
+        Simulate a two-word instruction with opcode and 2nd word secondword. 
+        Update all registers (except PC) and return the (byte-) address 
+        where execution will continue.
         """
         if (opcode & ~0x1F0) == 0x9000: # lds
             register = (opcode & 0x1F0) >> 4
@@ -1415,13 +1517,13 @@ class BreakAndExec(object):
             self.dbg.sram_write(register, val)
             self.logger.debug("Simulating lds")
             addr += 4
-        elif (opcode & ~0x1F0) == 0x9200: # sts 
+        elif (opcode & ~0x1F0) == 0x9200: # sts
             register = (opcode & 0x1F0) >> 4
             val = self.dbg.sram_read(register, 1)
             self.dbg.sram_write(secondword, val)
             self.logger.debug("Simulating sts")
             addr += 4
-        elif (opcode & 0x0FE0E) == 0x940C: # jmp 
+        elif (opcode & 0x0FE0E) == 0x940C: # jmp
             # since debugWIRE works only on MCUs with a flash address space <= 64 kwords
             # we do not need to use the bits from the opcode. Just put in a reminder: #BIGMEM
             addr = secondword << 1 ## now byte address
@@ -1442,14 +1544,15 @@ class BreakAndExec(object):
             addr = secondword << 1
         return addr
 
-    
-class MonitorCommand(object):
+
+class MonitorCommand():
+    #pylint: disable=too-many-instance-attributes
     """
     This class implements all the monitor commands
     It manages state variables, gives responses and selects
     the right action. The return value of the dispatch method is
     a pair consisting of an action identifier and the string to be displayed.
-    """ 
+    """
     def __init__(self):
         self._dw_mode_active = False
         self._dw_activated_once = False
@@ -1467,184 +1570,223 @@ class MonitorCommand(object):
         self._range = True
 
         self.moncmds = {
-            'breakpoints'  : self.monBreakpoints,
-            'caching'      : self.monCache,
-            'debugwire'    : self.monDebugwire,
-            'help'         : self.monHelp,
-            'info'         : self.monInfo,
-            'load'         : self.monLoad,
-            'onlyloaded'   : self.monNoload,
-            'reset'        : self.monReset,
-            'rangestepping': self.monRangeStepping,
-            'singlestep'   : self.monSinglestep,
-            'timers'       : self.monTimers,
-            'verify'       : self.monFlashVerify,
-            'version'      : self.monVersion,
-            'NoXML'        : self.monNoXML,
-            'OldExecution' : self.monOldExecution,
-            'Target'       : self.monTarget,
+            'breakpoints'  : self._mon_breakpoints,
+            'caching'      : self._mon_cache,
+            'debugwire'    : self._mon_debugwire,
+            'help'         : self._mon_help,
+            'info'         : self._mon_info,
+            'load'         : self._mon_load,
+            'onlyloaded'   : self._mon_noload,
+            'reset'        : self._mon_reset,
+            'rangestepping': self._mon_range_stepping,
+            'singlestep'   : self._mon_singlestep,
+            'timers'       : self._mon_timers,
+            'verify'       : self._mon_flash_verify,
+            'version'      : self._mon_version,
+            'NoXML'        : self._mon_no_xml,
+            'OldExecution' : self._mon_old_execution,
+            'Target'       : self._mon_target,
             }
 
     def is_onlyhwbps(self):
+        """
+        Returns True iff only hardware breakpoints are used
+        """
         return self._onlyhwbps
 
     def is_onlyswbps(self):
+        """
+        Returns True iff only software brrakpoints are used
+        """
         return self._onlyswbps
 
     def is_cache(self):
+        """
+        Returns True iff the loaded binary is cached and used as a cache
+        """
         return self._cache
 
     def is_dw_mode_active(self):
+        """
+        Returns True is dw mode is activated
+        """
         return self._dw_mode_active
 
     def set_dw_mode_active(self):
+        """
+        Sets the dw activated mode to True and remebers that dw has been
+        activated once
+        """
         self._dw_mode_active = True
         self._dw_activated_once = True
 
-    def is_dw_activated_once(self):
-        return self._dw_deactivated_once
-
     def is_fastload(self):
+        """
+        Returns True iff read-before-write is enabled for the laod function
+        """
         return self._fastload
 
     def is_noload(self):
+        """
+        Returns True iff execution without a previous load command is allowed
+        """
         return self._noload
 
     def is_range(self):
+        """
+        Returns True iff range-stepping is permitted.
+        """
         return self._range
 
     def is_safe(self):
+        """
+        Returns True iff interrupt-safe single-stepping is enabled
+        """
         return self._safe
 
     def is_timersfreeze(self):
+        """
+        Returns True iff timers will freeze when execution is stopped.
+        """
         return self._timersfreeze
 
     def is_verify(self):
+        """
+        Returns True iff we verify flashing after load.
+        """
         return self._verify
 
     def is_old_exec(self):
+        """
+        Returns True iff the traditional Exec style is used.
+        """
         return self._old_exec
 
     def is_noxml(self):
+        """
+        Returns True iff GDB is supposed to not accept XML queries
+        """
         return self._noxml
 
     def is_power(self):
+        """
+        Return True iff target is powered.
+        """
         return self._power
 
     def dispatch(self, tokens):
+        """
+        Dispatch according to tokens. First element is 
+        the monitor command.
+        """
         if not tokens:
-            return(self.monHelp(list()))
+            return self._mon_help([])
         if len(tokens) == 1:
             tokens += [""]
-        handler = self.monUnknown
-        for cmd in self.moncmds:
-            if cmd.startswith(tokens[0]):
-                if handler == self.monUnknown:
-                    handler = self.moncmds[cmd]
+        handler = self._mon_unknown
+        for cmd in self.moncmds.items():
+            if cmd[0].startswith(tokens[0]):
+                if handler == self._mon_unknown:
+                    handler = cmd[1]
                 else:
-                    handler = self.monAmbigious
+                    handler = self._mon_ambigious
         # For these internal monitor commands, we require that
         # they are fully spelled out so that they are not
         # invoked by a mistyped abbreviation
-        if handler == self.monNoXML and tokens[0] != "NoXML":
-            handler = self.monUnknown
-        if handler == self.monTarget and tokens[0] != "Target":
-            handler = self.monUnknown
-        if handler == self.monOldExecution and tokens[0] != "OldExecution":
-            handler = self.monUnknown
-        return(handler(tokens[1:]))
+        if handler == self._mon_no_xml and tokens[0] != "NoXML": # pylint: disable=comparison-with-callable
+            handler = self._mon_unknown
+        if handler == self._mon_target and tokens[0] != "Target": # pylint: disable=comparison-with-callable
+            handler = self._mon_unknown
+        if handler == self._mon_old_execution and tokens[0] != "OldExecution": # pylint: disable=comparison-with-callable
+            handler = self._mon_unknown
+        return handler(tokens[1:])
 
-    def monUnknown(self, tokens):
+    def _mon_unknown(self, _):
         return("", "Unknown 'monitor' command")
 
-    def monAmbigious(self, tokens):
+    def _mon_ambigious(self, _):
         return("", "Ambigious 'monitor' command")
 
-    def monBreakpoints(self, tokens):
+    # pylint: disable=too-many-return-statements
+    def _mon_breakpoints(self, tokens):
         if not tokens[0]:
             if self._onlyhwbps and self._onlyswbps:
                 return("", "Internal confusion: No breakpoints are allowed")
-            elif self._onlyswbps: 
+            if self._onlyswbps:
                 return("", "Only software breakpoints are allowed")
-            elif self._onlyhwbps:
+            if self._onlyhwbps:
                 return("", "Only hardware breakpoints are allowed")
-            else:
-                return("", "All breakpoints are allowed")
-        elif 'all'.startswith(tokens[0]):
+            return("", "All breakpoints are allowed")
+        if 'all'.startswith(tokens[0]):
             self._onlyhwbps = False
             self._onlyswbps = False
             return("", "All breakpoints are now allowed")
-        elif 'hardware'.startswith(tokens[0]):
+        if 'hardware'.startswith(tokens[0]):
             self._onlyhwbps = True
             self._onlyswbps = False
             return("", "Only hardware breakpoints are now allowed")
-        elif 'software'.startswith(tokens[0]):
+        if 'software'.startswith(tokens[0]):
             self._onlyhwbps = False
             self._onlyswbps = True
             return("", "Only software breakpoints are now allowed")
-        else:
-            return self.monUnknown(tokens[0])
+        return self._mon_unknown(tokens[0])
 
-    def monCache(self, tokens):
+    def _mon_cache(self, tokens):
         if (("enable".startswith(tokens[0]) and tokens[0] != "") or
-                (tokens[0] == "" and self._cache == True)):
+                (tokens[0] == "" and self._cache is True)):
             self._cache = True
             return("", "Flash memory will be cached")
-        elif (("disable".startswith(tokens[0]) and tokens[0] != "") or
-                  (tokens[0] == "" and self._cache == False)):
+        if (("disable".startswith(tokens[0]) and tokens[0] != "") or
+                (tokens[0] == "" and self._cache is False)):
             self._cache = False
             return("", "Flash memory will not be cached")
-        else:
-            return self.monUnknown(tokens[0])
-        
-    def monDebugwire(self, tokens):
+        return self._mon_unknown(tokens[0])
+
+    # pylint: disable=too-many-return-statements
+    def _mon_debugwire(self, tokens):
         if tokens[0] =="":
             if self._dw_mode_active:
                 return("", "debugWIRE mode is enabled")
-            else:
-                return("", "debugWIRE mode is disabled")
-        elif "enable".startswith(tokens[0]):
+            return("", "debugWIRE mode is disabled")
+        if "enable".startswith(tokens[0]):
             if not self._dw_mode_active:
                 if self._dw_activated_once:
-                    return("", "Cannot reactivate debugWIRE\nYou have to exit and restart the debugger")
+                    return("", "Cannot reactivate debugWIRE\n" +
+                               "You have to exit and restart the debugger")
                 self._dw_mode_active = True
                 self._dw_activated_once = True
                 return("dwon", "debugWIRE mode is now enabled")
-            else:
-                return("", "debugWIRE mode was already enabled")
-        elif "disable".startswith(tokens[0]):
+            return("", "debugWIRE mode was already enabled")
+        if "disable".startswith(tokens[0]):
             if self._dw_mode_active:
                 self._dw_mode_active = False
                 return("dwoff", "debugWIRE mode is now disabled")
-            else:
-                return("", "debugWIRE mode was already disabled")
-        else:
-            return self.monUnknown(tokens[0])
+            return("", "debugWIRE mode was already disabled")
+        return self._mon_unknown(tokens[0])
 
-    def monFlashVerify(self, tokens):
+    def _mon_flash_verify(self, tokens):
         if (("enable".startswith(tokens[0]) and tokens[0] != "") or
-                (tokens[0] == "" and self._verify == True)):
+                (tokens[0] == "" and self._verify is True)):
             self._verify = True
             return("", "Always verifying that load operations are successful")
-        elif (("disable".startswith(tokens[0]) and tokens[0] != "") or
-                  (tokens[0] == "" and self._verify == False)):
+        if (("disable".startswith(tokens[0]) and tokens[0] != "") or
+                (tokens[0] == "" and self._verify is False)):
             self._verify = False
             return("", "Load operations are not verified")
-        else:
-            return self.monUnknown(tokens[0])
+        return self._mon_unknown(tokens[0])
 
-    def monHelp(self, tokens):
+    def _mon_help(self, _):
         return("", """monitor help                       - this help text
 monitor version                    - print version
 monitor info                       - print info about target and debugger
 monitor debugwire [enable|disable] - activate/deactivate debugWIRE mode
 monitor reset                      - reset MCU
-monitor onlyloaded [enable|disable] 
+monitor onlyloaded [enable|disable]
                                    - execute only with loaded executable
 monitor load [readbeforewrite|writeonly]
-                                   - optimize loading by first reading flash 
+                                   - optimize loading by first reading flash
 monitor verify [enable|disable]    - verify that loading was successful
-monitor caching [on|off]           - use loaded executable as cache 
+monitor caching [on|off]           - use loaded executable as cache
 monitor timers [freeze|run]        - freeze/run timers when stopped
 monitor breakpoints [all|software|hardware]
                                    - allow breakpoints of a certain kind
@@ -1655,104 +1797,98 @@ monitor rangestepping [enable|disable]
 The first option is always the default one
 If no parameter is specified, the current setting is returned""")
 
-    def monInfo(self,tokens):
-        return ('info', """dw-gdbserver Version: """ + importlib.metadata.version("dwgdbserver") + """
-Target:    {}
-DebugWIRE: """ + "enabled" if self._dw_mode_active else "disabled" + """
-Voltage:   {}
+    def _mon_info(self, _):
+        return ('info', """dw-gdbserver Version:     """ +
+                    importlib.metadata.version("dwgdbserver") + """
+Target:                   {}
+DebugWIRE:                """ + ("enabled" if self._dw_mode_active else "disabled") + """
 
-Breakpoints: """ + ("all types" if (not self._onlyhwbps and not self._onlyswbps) else 
-                       ("only hardware bps" if self._onlyhwbps else "only software bps")) + """
-Execute only when loaded: """ + "enabled" if not self._noload else "disabled" + """
-Load mode: """ + "read before write" if self._fastload else "write only" + """
-Verify after load: """ + "enabled" if self._verify else "disabled" + """
-Caching loaded binary: """ + "enabled" if self._cache else "disabled" + """
-Timers: """ + "frozen when stopped" if self._timersfreeze else "run when stopped" + """
-Single-stepping: """ + "safe" if self._safe else "interruptible")
+Breakpoints:              """ + ("all types"
+                                     if (not self._onlyhwbps and not self._onlyswbps) else
+                                     ("only hardware bps"
+                                          if self._onlyhwbps else "only software bps")) + """
+Execute only when loaded: """ + ("enabled" if not self._noload else "disabled") + """
+Load mode:                """ + ("read before write" if self._fastload else "write only") + """
+Verify after load:        """ + ("enabled" if self._verify else "disabled") + """
+Caching loaded binary:    """ + ("enabled" if self._cache else "disabled") + """
+Timers:                   """ + ("frozen when stopped"
+                                     if self._timersfreeze else "run when stopped") + """
+Range-stepping:           """ + ("enabled" if self._range else "disabled") + """
+Single-stepping:          """ + ("safe" if self._safe else "interruptible"))
 
 
-
-    def monLoad(self,tokens):
+    def _mon_load(self,tokens):
         if (("readbeforewrite".startswith(tokens[0])  and tokens[0] != "") or
-            (tokens[0] == "" and self._fastload == True)):
+            (tokens[0] == "" and self._fastload is True)):
             self._fastload = True
             return("", "Reading before writing when loading")
-        elif (("writeonly".startswith(tokens[0])  and tokens[0] != "") or
-                  (tokens[0] == "" and self._fastload == False)):
+        if (("writeonly".startswith(tokens[0])  and tokens[0] != "") or
+                (tokens[0] == "" and self._fastload is False)):
             self._fastload = False
             return("", "No reading before writing when loading")
-        else:
-            return self.monUnknown(tokens[0])
+        return self._mon_unknown(tokens[0])
 
-    def monNoload(self, tokens):
+    def _mon_noload(self, tokens):
         if (("enable".startswith(tokens[0])  and tokens[0] != "") or
-                (tokens[0] == "" and self._noload == False)):
+                (tokens[0] == "" and self._noload is False)):
             self._noload = False
             return("",  "Execution without prior 'load' command is impossible")
-        elif (("disable".startswith(tokens[0])  and tokens[0] != "")  or
-                  (tokens[0] == "" and self._noload == True)):
+        if (("disable".startswith(tokens[0])  and tokens[0] != "")  or
+                (tokens[0] == "" and self._noload is True)):
             self._noload = True
             return("", "Execution without prior 'load' command is possible")
-        else:
-            return self.monUnknown(tokens[0])
-        
-    def monRangeStepping(self, tokens):
+        return self._mon_unknown(tokens[0])
+
+    def _mon_range_stepping(self, tokens):
         if (("enable".startswith(tokens[0])  and tokens[0] != "") or
-                (tokens[0] == "" and self._range == True)):
+                (tokens[0] == "" and self._range is True)):
             self._range = True
-            return("",  "Range stepping is possible")
-        elif (("disable".startswith(tokens[0])  and tokens[0] != "")  or
-                  (tokens[0] == "" and self._range == False)):
-            self._noload = True
-            return("", "Range stepping is impossible")
-        else:
-            return self.monUnknown(tokens[0])
-        
-    def monReset(self, tokens):
+            return("",  "Range stepping is enabled")
+        if (("disable".startswith(tokens[0])  and tokens[0] != "")  or
+                  (tokens[0] == "" and self._range is False)):
+            self._range = False
+            return("", "Range stepping is disabled")
+        return self._mon_unknown(tokens[0])
+
+    def _mon_reset(self, _):
         if self._dw_mode_active:
             return("reset", "MCU has been reset")
-        else:
-            return("","Enable debugWIRE mode first") 
+        return("","Enable debugWIRE mode first")
 
-    def monSinglestep(self, tokens):
+    def _mon_singlestep(self, tokens):
         if (("safe".startswith(tokens[0]) and tokens[0] != "") or
-                (tokens[0] == "" and self._safe == True)):
+                (tokens[0] == "" and self._safe is True)):
             self._safe = True
             return("", "Single-stepping is interrupt-safe")
-        elif (("interruptible".startswith(tokens[0]) and tokens[0] != "")  or
-                  (tokens[0] == "" and self._safe == False)):
+        if (("interruptible".startswith(tokens[0]) and tokens[0] != "")  or
+                (tokens[0] == "" and self._safe is False)):
             self._safe = False
             return("", "Single-stepping is interruptible")
-        else:
-            return self.monUnknown(tokens[0])
+        return self._mon_unknown(tokens[0])
 
-    def monTimers(self, tokens):
+    def _mon_timers(self, tokens):
         if (("freeze".startswith(tokens[0]) and tokens[0] != "") or
-                (tokens[0] == "" and self._timersfreeze == True)):
+                (tokens[0] == "" and self._timersfreeze is True)):
             self._timersfreeze = True
             return(0, "Timers are frozen when execution is stopped")
-        elif (("run".startswith(tokens[0])  and tokens[0] != "") or
-                  (tokens[0] == "" and self._timersfreeze == False)):
+        if (("run".startswith(tokens[0])  and tokens[0] != "") or
+                (tokens[0] == "" and self._timersfreeze is False)):
             self._timersfreeze = False
             return(1, "Timers will run when execution is stopped")
-        else:
-            return self.monUnknown(tokens[0])
+        return self._mon_unknown(tokens[0])
 
-    def monVersion(self, tokens):
+    def _mon_version(self, _):
         return("", "dw-gdbserver {}".format(importlib.metadata.version("dwgdbserver")))
 
-    def monLiveTests(self, tokens):
-        return("test", "Now we are running a number of tests on the real target")
-
-    def monNoXML(self, tokens):
+    def _mon_no_xml(self, _):
         self._noxml = True
         return("", "XML disabled")
 
-    def monOldExecution(self, tokens):
+    def _mon_old_execution(self, _):
         self._old_exec = True
         return("", "Old execution mode")
 
-    def monTarget(self, tokens):
+    def _mon_target(self, tokens):
         if ("on".startswith(tokens[0]) and len(tokens[0]) > 1):
             self._power = True
             res = ("power on", "Target power on")
@@ -1762,36 +1898,37 @@ Single-stepping: """ + "safe" if self._safe else "interruptible")
         elif ("query".startswith(tokens[0]) and len(tokens[0]) > 1):
             res = ("power query", "Target query")
         elif tokens[0] == "":
-            if self._power == True:
+            if self._power is True:
                 res = ("", "Target power is on")
             else:
                 res = ("", "Target power is off")
         else:
-            return self.monUnknown(tokens[0])
+            return self._mon_unknown(tokens[0])
         return res
 
-class DebugWIRE(object):
+class DebugWIRE():
     """
     This class takes care of attaching to and detaching from a debugWIRE target, which is a bit
-    complicated. The target is either in ISP or debugWIRE mode and the transition from ISP to debugWIRE 
-    involves power-cycling the target, which one would not like to do every time connecting to the
-    target. Further, if one does this transition, it is necessary to restart the debugging tool by a 
-    housekeeping end_session/start_session sequence. 
+    complicated. The target is either in ISP or debugWIRE mode and the transition from ISP to 
+    debugWIRE involves power-cycling the target, which one would not like to do every time 
+    connecting to the target. Further, if one does this transition, it is necessary to restart 
+    the debugging tool by a housekeeping end_session/start_session sequence.
     """
     def __init__(self, dbg, devicename):
         self.dbg = dbg
         self.spidevice = None
-        self.devicename = devicename
+        self._devicename = devicename
         self.logger = getLogger('DebugWIRE')
 
-    def warmStart(self, graceful=True):
+    def warm_start(self, graceful=True):
         """
-        Try to establish a connection to the debugWIRE OCD. If not possible (because we are still in ISP mode) and
-        graceful=True, the function returns false, otherwise true. If not graceful, an exception is thrown when we are
+        Try to establish a connection to the debugWIRE OCD. If not possible 
+        (because we are still in ISP mode) and graceful=True, the function returns false, 
+        otherwise true. If not graceful, an exception is thrown when we are
         unsuccessul in establishing the connection.
         """
         try:
-            self.dbg.setup_session(self.devicename)
+            self.dbg.setup_session(self._devicename)
             idbytes = self.dbg.device.read_device_id()
             sig = (0x1E<<16) + (idbytes[1]<<8) + idbytes[0]
             self.logger.debug("Device signature by debugWIRE: %X", sig)
@@ -1799,22 +1936,29 @@ class DebugWIRE(object):
             self.dbg.reset()
         except FatalError:
             raise
-        except Exception as e:
+        except Exception as e: # pylint: disable=broad-exception-caught
             if graceful:
                 self.logger.debug("Graceful exception: %s",e)
                 return False  # we will try to connect later
-            else:
-                raise
+            raise
         # Check device signature
+        self.logger.debug("Device signature expected: %X", self.dbg.device_info['device_id'])
         if sig != self.dbg.device_info['device_id']:
-            # Some funny special cases of chips pretending to be someone else when in debugWIRE mode
-            if sig == 0x1E930F and self.dbg.device_info['device_id'] == 0x1E930A: return # pretends to be a 88P, but is 88
-            if sig == 0x1E940B and self.dbg.device_info['device_id'] == 0x1E9406: return # pretends to be a 168P, but is 168
-            if sig == 0x1E950F and self.dbg.device_info['device_id'] == 0x1E9514: return # pretends to be a 328P, but is 328
-            raise FatalError("Wrong MCU: '{}', expected: '{}'".format(dev_name[sig], dev_name[self.dbg.device_info['device_id']]))
+            # Some funny special cases of chips pretending to be someone else
+            # when in debugWIRE mode
+            if (
+                # pretends to be a 88P, but is 88
+                (not (sig == 0x1E930F and self.dbg.device_info['device_id'] == 0x1E930A)) and
+                # pretends to be a 168P, but is 168
+                (not (sig == 0x1E940B and self.dbg.device_info['device_id'] == 0x1E9406)) and
+                # pretends to be a 328P, but is 328
+                (not (sig == 0x1E950F and self.dbg.device_info['device_id'] == 0x1E9514))):
+                raise FatalError("Wrong MCU: '{}', expected: '{}'".\
+                                     format(dev_name[sig],
+                                            dev_name[self.dbg.device_info['device_id']]))
         # read out program counter and check whether it contains stuck to 1 bits
         pc = self.dbg.program_counter_read()
-        self.logger.debug("PC=%X",pc)
+        self.logger.debug("PC(word)=%X",pc)
         if pc << 1 > self.dbg.memory_info.memory_info_by_name('flash')['size']:
             raise FatalError("Program counter of MCU has stuck-at-1-bits")
         # disable running timers while stopped
@@ -1823,19 +1967,21 @@ class DebugWIRE(object):
                                                   0)
         return True
 
-    def coldStart(self, graceful=False, callback=None, allow_erase=True):
+    def cold_start(self, graceful=False, callback=None, allow_erase=True):
         """
-        On the assumption that we are in ISP mode, first DWEN is programmed, then a power-cycle is performed
-        and finally, we enter debugWIRE mode. If graceful is True, we allow for a failed attempt to connect to
-        the ISP core assuming that we are already in debugWIRE mode. If callback is Null or returns False, 
-        we wait for a manual power cycle. Otherwise, we assume that the callback function does the job.
+        On the assumption that we are in ISP mode, first DWEN is programmed, 
+        then a power-cycle is performed and finally, we enter debugWIRE mode.
+        If graceful is True, we allow for a failed attempt to connect to
+        the ISP core assuming that we are already in debugWIRE mode. If 
+        callback is Null or returns False, we wait for a manual power cycle.
+        Otherwise, we assume that the callback function does the job.
         """
         try:
             self.enable(erase_if_locked=allow_erase)
-            self.powerCycle(callback=callback)
+            self.power_cycle(callback=callback)
         except (PymcuprogError, FatalError):
             raise
-        except Exception as e:
+        except Exception as e: # pylint: disable=broad-exception-caught
             self.logger.debug("Graceful exception: %s",e)
             if not graceful:
                 raise
@@ -1844,11 +1990,15 @@ class DebugWIRE(object):
         self.dbg.housekeeper.end_session()
         self.dbg.housekeeper.start_session()
         # now start the debugWIRE session
-        return self.warmStart(graceful=False)
-            
-               
-    def powerCycle(self, callback=None):
-        # ask user for power-cycle and wait for voltage to come up again
+        return self.warm_start(graceful=False)
+
+
+    def power_cycle(self, callback=None):
+        """
+        Ask user for power-cycle and wait for voltage to come up again.
+        If callback is callable, we try that first. It might magically
+        perform a power cycle.
+        """
         wait_start = time.monotonic()
         last_message = 0
         magic = False
@@ -1859,8 +2009,8 @@ class DebugWIRE(object):
         self.dbg.housekeeper.end_session() # might be necessary after an unsuccessful power-cycle
         self.dbg.housekeeper.start_session()
         while time.monotonic() - wait_start < 150:
-            if (time.monotonic() - last_message > 20):
-                print("*** Please power-cycle the target system ***")
+            if time.monotonic() - last_message > 20:
+                self.logger.warning("*** Please power-cycle the target system ***")
                 last_message = time.monotonic()
             if read_target_voltage(self.dbg.housekeeper) < 0.5:
                 wait_start = time.monotonic()
@@ -1870,16 +2020,16 @@ class DebugWIRE(object):
                     time.sleep(0.1)
                 if read_target_voltage(self.dbg.housekeeper) < 1.5:
                     raise FatalError("Timed out waiting for repowering target")
-                time.sleep(1) # wait for debugWIRE system to be ready to accept connections 
+                time.sleep(1) # wait for debugWIRE system to be ready to accept connections
                 return
             time.sleep(0.1)
         raise FatalError("Timed out waiting for power-cycle")
- 
+
     def disable(self):
         """
         Disables debugWIRE and unprograms the DWEN fusebit. After this call,
         there is no connection to the target anymore. For this reason all critical things
-        needs to be done before, such as cleaning up breakpoints. 
+        needs to be done before, such as cleaning up breakpoints.
         """
         # stop core
         self.dbg.device.avr.protocol.stop()
@@ -1913,7 +2063,7 @@ class DebugWIRE(object):
         """
         Enables debugWIRE mode by programming the DWEN fuse bit. If the chip is locked,
         it will be erased. Also the BOOTRST fusebit is disabled.
-        Since the implementation of ISP programming is somewhat funny, a few stop/start 
+        Since the implementation of ISP programming is somewhat funny, a few stop/start
         sequences and double reads are necessary.
         """
         self.logger.info("Try to connect using ISP")
@@ -1923,21 +2073,25 @@ class DebugWIRE(object):
             raise FatalError("Wrong MCU: '{}', expected: '{}'".format(
                 dev_name[device_id],
                 dev_name[self.dbg.device_info['device_id']]))
-        fuses = self.spidevice.read(self.dbg.memory_info.memory_info_by_name('fuses'), 0, 3)
+        fuses = self.spidevice.read(self.dbg.memory_info.\
+                                        memory_info_by_name('fuses'), 0, 3)
         self.logger.debug("Fuses read: %X %X %X",fuses[0], fuses[1], fuses[2])
-        lockbits = self.spidevice.read(self.dbg.memory_info.memory_info_by_name('lockbits'), 0, 1)
+        lockbits = self.spidevice.read(self.dbg.memory_info.\
+                                           memory_info_by_name('lockbits'), 0, 1)
         self.logger.debug("Lockbits read: %X", lockbits[0])
-        if (lockbits[0] != 0xFF):
+        if lockbits[0] != 0xFF and erase_if_locked:
             self.logger.info("MCU is locked. Will be erased.")
             self.spidevice.erase()
-            lockbits = self.spidevice.read(self.dbg.memory_info.memory_info_by_name('lockbits'), 0, 1)
+            lockbits = self.spidevice.read(self.dbg.memory_info.\
+                                               memory_info_by_name('lockbits'), 0, 1)
             self.logger.debug("Lockbits after erase: %X", lockbits[0])
         if 'bootrst_fuse' in self.dbg.device_info:
             # unprogramm bit 0 in high or extended fuse
-            self.logger.debug("BOOTRST fuse will be unprogrammed.")
+            self.logger.info("BOOTRST fuse will be unprogrammed.")
             bfuse = self.dbg.device_info['bootrst_fuse']
             fuses[bfuse] |= 0x01
-            self.spidevice.write(self.dbg.memory_info.memory_info_by_name('fuses'), bfuse, fuses[bfuse:bfuse+1])
+            self.spidevice.write(self.dbg.memory_info.memory_info_by_name('fuses'),
+                                     bfuse, fuses[bfuse:bfuse+1])
         # program the DWEN bit
         # leaving and re-entering programming mode is necessary, otherwise write has no effect
         self.spidevice.isp.leave_progmode()
@@ -1945,15 +2099,22 @@ class DebugWIRE(object):
         fuses[1] &= (0xFF & ~(self.dbg.device_info['dwen_mask']))
         self.logger.debug("New high fuse: 0x%X", fuses[1])
         self.spidevice.write(self.dbg.memory_info.memory_info_by_name('fuses'), 1, fuses[1:2])
+        # needs to be done twice!
         fuses = self.spidevice.read(self.dbg.memory_info.memory_info_by_name('fuses'), 0, 3)
-        fuses = self.spidevice.read(self.dbg.memory_info.memory_info_by_name('fuses'), 0, 3) # needs to be done twice!
+        fuses = self.spidevice.read(self.dbg.memory_info.memory_info_by_name('fuses'), 0, 3)
         self.logger.debug("Fuses read again: %X %X %X",fuses[0], fuses[1], fuses[2])
         self.spidevice.isp.leave_progmode()
         # in order to start a debugWIRE session, a power-cycle is now necessary, but
         # this has to be taken care of by the calling process
-        
 
-class AvrGdbRspServer(object):
+# pylint: disable=too-many-instance-attributes
+class AvrGdbRspServer():
+    """
+    This is the GDB RSP server, setting up the connection to the GDB, reading 
+    and responding, and terminating. The important part is calling the handle_data
+    method of the handler.
+    """
+
     def __init__(self, avrdebugger, devicename, port):
         self.avrdebugger = avrdebugger
         self.devicename = devicename
@@ -1965,9 +2126,13 @@ class AvrGdbRspServer(object):
         self.address = None
 
     def serve(self):
+        """
+        Serve away ...
+        """
         self.gdb_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.logger.info("Listening on port {} for gdb connection".format(self.port))
-        if not (self.logger.getEffectiveLevel() in [logging.DEBUG, logging.INFO]): # make sure that this message can be seen
+        self.logger.info("Listening on port %s for gdb connection", self.port)
+        # make sure that this message can be seen
+        if self.logger.getEffectiveLevel() not in {logging.DEBUG, logging.INFO}:
             print("Listening on port {} for gdb connection".format(self.port))
         self.gdb_socket.bind(("127.0.0.1", self.port))
         self.gdb_socket.listen()
@@ -1981,18 +2146,19 @@ class AvrGdbRspServer(object):
                 data = self.connection.recv(8192)
                 if len(data) > 0:
                     # self.logger.debug("Received over TCP/IP: %s",data)
-                    self.handler.handleData(data)
-            self.handler.pollEvents()
+                    self.handler.handle_data(data)
+            self.handler.poll_events()
 
 
     def __del__(self):
         try:
-            self.handler.bp.cleanupBreakpoints()
+            self.handler.bp.cleanup_breakpoints()
             self.avrdebugger.stop_debugging()
-        except Exception as e:
-            self.logger.debug("Graceful exception during stopping: %s",e)
+        except Exception as e: #pylint: disable=broad-exception-caught
+            self.logger.info("Graceful exception during stopping: %s",e)
         finally:
-            time.sleep(1) # sleep 1 second before closing in order to allow the client to close first
+            # sleep 1 second before closing in order to allow the client to close first
+            time.sleep(1)
             self.logger.info("Closing socket")
             if self.gdb_socket:
                 self.gdb_socket.close()
@@ -2001,7 +2167,7 @@ class AvrGdbRspServer(object):
                 self.connection.close()
 
 
-            
+
 def _setup_tool_connection(args, logger):
     """
     Copied from pymcuprog_main and modified so that no messages printed on the console
@@ -2012,7 +2178,8 @@ def _setup_tool_connection(args, logger):
     if args.tool == "uart":
         baudrate = _clk_as_int(args)
         # Embedded GPIO/UART tool (eg: raspberry pi) => no USB connection
-        toolconnection = ToolSerialConnection(serialport=args.uart, baudrate=baudrate, timeout=args.uart_timeout)
+        toolconnection = ToolSerialConnection(serialport=args.uart,
+                                                  baudrate=baudrate, timeout=args.uart_timeout)
     else:
         usb_serial = args.serialnumber
         product = args.tool
@@ -2020,7 +2187,8 @@ def _setup_tool_connection(args, logger):
             logger.info("Connecting to {0:s} ({1:s})'".format(product, usb_serial))
         else:
             if usb_serial:
-                logger.info("Connecting to any tool with USB serial number '{0:s}'".format(usb_serial))
+                logger.info("Connecting to any tool with USB serial number '{0:s}'".\
+                                format(usb_serial))
             elif product:
                 logger.info("Connecting to any {0:s}".format(product))
             else:
@@ -2029,7 +2197,7 @@ def _setup_tool_connection(args, logger):
 
     return toolconnection
 
-
+# pylint: disable=too-many-statements, too-many-branches, too-many-return-statements
 def main():
     """
     Configures the CLI and parses the arguments
@@ -2037,23 +2205,23 @@ def main():
     parser = argparse.ArgumentParser(usage="%(prog)s [options]",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description=textwrap.dedent('''\n\
-    GDBserver for debugWIRE MCUs 
+    GDBserver for debugWIRE MCUs
             '''))
 
     parser.add_argument("-d", "--device",
                             dest='dev',
                             type=str,
                             help="device to debug")
-    
+
     parser.add_argument('-g', '--gede',  action="store_true",
-                            help='start gede')    
+                            help='start gede')
 
     parser.add_argument('-p', '--port',  type=int, default=2000, dest='port',
                             help='local port on machine (default 2000)')
-    
-    parser.add_argument('-s', '--start',  dest='prg', 
+
+    parser.add_argument('-s', '--start',  dest='prg',
                             help='start specified program or "noop"')
-    
+
     # Tool to use
     parser.add_argument("-t", "--tool",
                             type=str, choices=['atmelice', 'edbg', 'jtagice3', 'medbg', 'nedbg',
@@ -2066,7 +2234,8 @@ def main():
                             help="USB serial number of the unit to use")
 
     parser.add_argument("-v", "--verbose",
-                            default="info", choices=['debug', 'info', 'warning', 'error', 'critical'],
+                            default="info", choices=['debug', 'info',
+                                                         'warning', 'error', 'critical'],
                             help="Logging verbosity level")
 
     parser.add_argument("-V", "--version",
@@ -2087,10 +2256,14 @@ def main():
     if args.verbose.upper() == "DEBUG":
         getLogger('pyedbglib').setLevel(logging.INFO)
     if args.verbose.upper() != "DEBUG":
-        getLogger('pyedbglib.hidtransport.hidtransportbase').setLevel(logging.CRITICAL) # suppress messages from hidtransport
-        getLogger('pyedbglib.protocols').setLevel(logging.CRITICAL) # supress spurious error messages from pyedbglib
-        getLogger('pymcuprog.nvm').setLevel(logging.CRITICAL) # suppress errors of not connecting: It is intended!
-        getLogger('pymcuprog.avr8target').setLevel(logging.ERROR) # we do not want to see the "read flash" messages
+        # suppress messages from hidtransport
+        getLogger('pyedbglib.hidtransport.hidtransportbase').setLevel(logging.CRITICAL)
+        # supress spurious error messages from pyedbglib
+        getLogger('pyedbglib.protocols').setLevel(logging.CRITICAL)
+        # suppress errors of not connecting: It is intended!
+        getLogger('pymcuprog.nvm').setLevel(logging.CRITICAL)
+        # we do not want to see the "read flash" messages
+        getLogger('pymcuprog.avr8target').setLevel(logging.ERROR)
 
     if args.version:
         print("dw-gdbserver version {}".format(importlib.metadata.version("dwgdbserver")))
@@ -2106,16 +2279,15 @@ def main():
 
     if not device:
         print("Please specify target MCU with -d option")
-        return(1)
+        return 1
 
     if device.lower() not in dev_id:
         logger.critical("Device '%s' is not supported by dw-gdbserver", device)
         sys.exit(1)
-            
+
     if args.tool == "dwlink":
-        dwgdbserver.dwlink.main(args)
-        return
-        
+        return dwlink.main(args)
+
     # Use pymcuprog backend for initial connection here
     backend = Backend()
     toolconnection = _setup_tool_connection(args, logger)
@@ -2123,9 +2295,8 @@ def main():
     try:
         backend.connect_to_tool(toolconnection)
     except pymcuprog.pymcuprog_errors.PymcuprogToolConnectionError:
-        dwgdbserver.dwlink.main(args)
-        return(0)
-        
+        return dwlink.main(args)
+
     finally:
         backend.disconnect_from_tool()
 
@@ -2138,17 +2309,18 @@ def main():
     server = AvrGdbRspServer(avrdebugger, device, args.port)
     try:
         server.serve()
-        
+
     except (EndOfSession, SystemExit, KeyboardInterrupt):
         logger.info("End of session")
         print("--- exit ---\r\n")
-        return(0)
-        
-    except Exception as e:
-        if logger.getEffectiveLevel() != logging.DEBUG:
+        return 0
+
+    except (ValueError, Exception) as e:
+        if logger.get_effective_level() != logging.DEBUG:
             logger.critical("Fatal Error: %s",e)
-        else:
-            raise
-    
+            return 1
+        raise
+    return 0
+
 if __name__ == "__main__":
     sys.exit(main())
