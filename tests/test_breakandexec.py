@@ -1,9 +1,13 @@
-from unittest.mock import Mock, MagicMock, patch, call, create_autospec
+"""
+The test suit for the BreakAndExec class
+"""
+#pylint: disable=protected-access,missing-function-docstring,consider-using-f-string,invalid-name,line-too-long,missing-class-docstring,too-many-public-methods
+import logging
+from unittest.mock import Mock, call, create_autospec
 from unittest import TestCase
 from dwgdbserver.xavrdebugger import XAvrDebugger
-from dwgdbserver.dwgdbserver import GdbHandler, EndOfSession, FatalError, Memory, MonitorCommand, BreakAndExec, DebugWIRE, SIGINT, SIGTRAP, SIGHUP, SIGABRT
+from dwgdbserver.dwgdbserver import MonitorCommand, BreakAndExec, SIGTRAP, SIGABRT
 from .util.instr import instrmap
-import logging
 
 logging.basicConfig(level=logging.CRITICAL)
 

@@ -1,22 +1,19 @@
+"""
+The test suit for the XNvmAccessProviderCmsisDapDebugwire class
+"""
+#pylint: disable=protected-access,missing-function-docstring,consider-using-f-string,invalid-name,line-too-long,missing-class-docstring,too-many-public-methods
 import logging
-from unittest.mock import Mock, MagicMock, patch, call, create_autospec
+from unittest.mock import MagicMock, patch, call, create_autospec
 from unittest import TestCase
+
+from pymcuprog.deviceinfo import deviceinfo
+
+from pyedbglib.protocols.jtagice3protocol import Jtagice3ResponseError
+from pyedbglib.protocols.avr8protocol import Avr8Protocol
 
 from dwgdbserver.xnvmdebugwire import XNvmAccessProviderCmsisDapDebugwire
 from dwgdbserver.xavr8target import XTinyAvrTarget
 from dwgdbserver.deviceinfo.devices.attiny85 import DEVICE_INFO
-
-from pymcuprog.avrdebugger import AvrDebugger
-from pymcuprog.avr8target import AvrDevice
-from pymcuprog.deviceinfo import deviceinfo
-from pymcuprog.nvmupdi import NvmAccessProviderCmsisDapUpdi
-from pymcuprog.pymcuprog_errors import PymcuprogToolConfigurationError,\
-     PymcuprogNotSupportedError
-
-from pyedbglib.protocols.jtagice3protocol import Jtagice3ResponseError
-from pyedbglib.protocols.avr8protocol import Avr8Protocol
-from pyedbglib.protocols.edbgprotocol import EdbgProtocol
-from pyedbglib.util import binary
 
 logging.basicConfig(level=logging.DEBUG)
 

@@ -1,11 +1,14 @@
-from unittest.mock import Mock, MagicMock, patch, call, create_autospec
+"""
+The test suit for the DebugWire class
+"""
+#pylint: disable=protected-access,missing-function-docstring,consider-using-f-string,invalid-name,line-too-long,missing-class-docstring,too-many-public-methods
+import logging
+from unittest.mock import Mock, MagicMock, patch, create_autospec
 from unittest import TestCase
 #from pymcuprog.utils import read_target_voltage
 from dwgdbserver.xavrdebugger import XAvrDebugger
-from dwgdbserver.dwgdbserver import DebugWIRE,  EndOfSession, FatalError, SIGINT, SIGTRAP, SIGHUP
-from dwgdbserver.xnvmdebugwire import  XNvmAccessProviderCmsisDapDebugwire
-from dwgdbserver.deviceinfo.devices.alldevices import dev_id, dev_name
-import logging
+from dwgdbserver.dwgdbserver import DebugWIRE,  FatalError
+from dwgdbserver.deviceinfo.devices.alldevices import dev_name
 
 logging.basicConfig(level=logging.CRITICAL)
 
@@ -20,7 +23,6 @@ class TestDebugWire(TestCase):
         self.dw.dbg.memory_info = MagicMock()
         self.dw.dbg.transport = MagicMock()
         self.dw.dbg.device.read_device_id.return_value = bytearray([0x0F, 0x95]) # atmega328p
-        mock_nvm = create_autospec(XNvmAccessProviderCmsisDapDebugwire, spec_set=False, instance=True)
 
     def test_warm_start_not_ready(self):
         self.dw.dbg.device_info.__getitem__.return_value = 0x1E9514

@@ -24,8 +24,8 @@ repos:
       [
         "-rn", # Only display messages
         "-sn", # Don't display the score
-	"--ignore-pattern=(test_.*\\.py)|(at(tiny|mega|90).*\\.py)",
-	"--ignore=makeimap.py,instr.py,harvest.py,alldevices.py,collect.py",
+	"--ignore-pattern=(at(tiny|mega|90).*\\.py)",
+	"--ignore=harvest.py,alldevices.py,collect.py",
 	"--disable=similarities,import-error"
       ]
     additional_dependencies:
@@ -39,6 +39,5 @@ repos:
     args: []
     pass_filenames: false
     additional_dependencies:
-      [ pyedbglib==2.24.2.18,
-        pymcuprog==3.17.3.45,
-      ]
+      - pyedbglib
+      - pymcuprog

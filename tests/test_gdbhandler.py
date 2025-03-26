@@ -1,10 +1,13 @@
+"""
+The test suit for the GdbHandler class
+"""
+#pylint: disable=protected-access,missing-function-docstring,consider-using-f-string,invalid-name,line-too-long,missing-class-docstring,too-many-public-methods
+import logging
 from unittest.mock import Mock, MagicMock, patch, call, create_autospec
 from unittest import TestCase
 import socket
 from dwgdbserver.xavrdebugger import XAvrDebugger
-from dwgdbserver.dwgdbserver import GdbHandler, EndOfSession, Memory, MonitorCommand, BreakAndExec, DebugWIRE, SIGINT, SIGTRAP, SIGHUP
-from pyedbglib.protocols.edbgprotocol import EdbgProtocol
-import logging
+from dwgdbserver.dwgdbserver import GdbHandler, EndOfSession, Memory, MonitorCommand, BreakAndExec, DebugWIRE, SIGINT, SIGHUP
 
 logging.basicConfig(level=logging.CRITICAL)
 

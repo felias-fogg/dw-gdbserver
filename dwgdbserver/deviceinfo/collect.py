@@ -1,15 +1,15 @@
 """
-Collects all devices from deviceinfo.device and generates a file with two dicts, one mapping device names
-to signatures, one mapping ids to interfaces, the other one from signatures to names. Provide path to devices folöder.
+Collects all devices from deviceinfo.device and generates a file with two dicts, one mapping
+device names to signatures, one mapping ids to interfaces, the other one from signatures to
+names. Provide path to devices folder.
 """
-
+#pylint: disable=missing-function-docstring
 import os
 import argparse
 import textwrap
 import re
 
 def main():
-
     parser = argparse.ArgumentParser(
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description=textwrap.dedent('''\
@@ -19,8 +19,8 @@ def main():
         '''))
 
     parser.add_argument("filename",
-                        help="name (and path) of file to harvest data from or path to folder with atdf files"
-                        )
+            help="name (and path) of file to harvest data from or path to folder with atdf files"
+                       )
 
     arguments = parser.parse_args()
 
@@ -29,24 +29,24 @@ def main():
     dev_iface = {}
     for file in os.listdir(arguments.filename):
         if file.endswith(".py"):
-            with open(arguments.filename + "/" +file) as f:
+            with open(arguments.filename + "/" +file, encoding='utf-8') as f:
                 spec = f.read()
                 if spec.find("DEVICE_INFO") < 0:
                     continue
                 name = re.findall("'name'\\s*:\\s*'(.*)'", spec)[0]
-                id = int(re.findall("'device_id'\\s*:\\s*(0x.*),", spec)[0], 16)
+                sig = int(re.findall("'device_id'\\s*:\\s*(0x.*),", spec)[0], 16)
                 iface = re.findall("'interface'\\s*:\\s*'(.*)'", spec)[0]
-                dev_id[name] = id
-                oldname = dev_name.get(id)
+                dev_id[name] = sig
+                oldname = dev_name.get(sig)
                 if not oldname:
-                    dev_name[id] = name
+                    dev_name[sig] = name
                 elif oldname.startswith(name):
-                    dev_name[id] = name + "(" + oldname.removeprefix(name) + ")"
+                    dev_name[sig] = name + "(" + oldname.removeprefix(name) + ")"
                 elif name.startswith(oldname):
-                    dev_name[id] = oldname + "(" + name.removeprefix(oldname) + ")"
+                    dev_name[sig] = oldname + "(" + name.removeprefix(oldname) + ")"
                 else:
-                    dev_name[id] = name + "/" + oldname
-                dev_iface[id] = iface
+                    dev_name[sig] = name + "/" + oldname
+                dev_iface[sig] = iface
 
     print('dev_id =', dev_id)
     print('dev_name =', dev_name)

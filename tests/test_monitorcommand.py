@@ -1,9 +1,12 @@
-from unittest.mock import Mock, MagicMock, patch, call, create_autospec
+"""
+The test suit for the MonitorCommand class
+"""
+#pylint: disable=protected-access,missing-function-docstring,consider-using-f-string,invalid-name,line-too-long,missing-class-docstring
+import logging
+import importlib
 from unittest import TestCase
 from dwgdbserver.dwgdbserver import MonitorCommand
-import importlib
 
-import logging
 
 logging.basicConfig(level=logging.CRITICAL)
 
@@ -141,4 +144,3 @@ class TestMonitorCommand(TestCase):
         except importlib.metadata.PackageNotFoundError:
             return
         self.assertEqual(self.mo.dispatch(['version']), ("", "dw-gdbserver {}".format(importlib.metadata.version("dwgdbserver"))))
-

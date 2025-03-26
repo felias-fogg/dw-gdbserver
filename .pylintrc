@@ -1,2 +1,2 @@
 [tool.pylint.MASTER]
-ignore=deviceinfo,tests,devices
+ignore-pattern=(at(tiny|mega|90).*\\.py)

@@ -1,21 +1,14 @@
-import logging
-from unittest.mock import Mock, MagicMock, patch, call, create_autospec
+"""
+The test suit for the XAvrDebugger class
+"""
+#pylint: disable=protected-access,missing-function-docstring,consider-using-f-string,invalid-name,line-too-long,missing-class-docstring,too-many-public-methods
+from unittest.mock import MagicMock, patch
 from unittest import TestCase
 
-from dwgdbserver.xnvmdebugwire import XNvmAccessProviderCmsisDapDebugwire
+from pyedbglib.protocols.avr8protocol import Avr8Protocol
+
 from dwgdbserver.xavrdebugger import XAvrDebugger
 from dwgdbserver.xavr8target import XTinyAvrTarget
-
-from pymcuprog.avrdebugger import AvrDebugger
-from pymcuprog.avr8target import AvrDevice
-from pymcuprog.deviceinfo import deviceinfo
-from pymcuprog.nvmupdi import NvmAccessProviderCmsisDapUpdi
-from pymcuprog.pymcuprog_errors import PymcuprogToolConfigurationError,\
-     PymcuprogNotSupportedError
-
-from pyedbglib.protocols.avr8protocol import Avr8Protocol
-from pyedbglib.protocols.edbgprotocol import EdbgProtocol
-from pyedbglib.util import binary
 
 class TestXAvrDebugger(TestCase):
 

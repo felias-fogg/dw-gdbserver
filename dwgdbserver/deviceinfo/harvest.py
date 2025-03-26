@@ -3,16 +3,13 @@ Harvester scripts
 
 Currently only supports AVR atdf files
 """
-# Python 3 compatibility for Python 2
-from __future__ import print_function
+# pylint: disable=consider-using-f-string,line-too-long
 
 import os
 import collections
 import argparse
-from os import read
 import textwrap
 from xml.etree import ElementTree
-from pymcuprog.deviceinfo import deviceinfokeys
 
 from pymcuprog.deviceinfo.memorynames import MemoryNames
 from pymcuprog.deviceinfo.deviceinfokeys import DeviceMemoryInfoKeys, DeviceInfoKeysAvr
@@ -67,9 +64,9 @@ def determine_chiperase_effect(memoryname, architecture):
     if 'avr' in architecture:
         if memoryname in [MemoryNames.USER_ROW, MemoryNames.FUSES, MemoryNames.SIGNATURES, MemoryNames.INTERNAL_SRAM]:
             return 'ChiperaseEffect.NOT_ERASED'
-        elif memoryname in [MemoryNames.LOCKBITS, MemoryNames.FLASH]:
+        if memoryname in [MemoryNames.LOCKBITS, MemoryNames.FLASH]:
             return 'ChiperaseEffect.ALWAYS_ERASED'
-        elif memoryname in [MemoryNames.EEPROM, MemoryNames.BOOT_ROW]:
+        if memoryname in [MemoryNames.EEPROM, MemoryNames.BOOT_ROW]:
             return 'ChiperaseEffect.CONDITIONALLY_ERASED_AVR'
 
     return '# To be filled in manually'
@@ -91,7 +88,7 @@ def determine_isolated_erase(memoryname, architecture):
             return 'True'
         if memoryname in [MemoryNames.USER_ROW, MemoryNames.EEPROM, MemoryNames.BOOT_ROW]:
             return 'True'
-        elif memoryname in [MemoryNames.INTERNAL_SRAM, MemoryNames.LOCKBITS, MemoryNames.FLASH, MemoryNames.FUSES, MemoryNames.SIGNATURES]:
+        if memoryname in [MemoryNames.INTERNAL_SRAM, MemoryNames.LOCKBITS, MemoryNames.FLASH, MemoryNames.FUSES, MemoryNames.SIGNATURES]:
             return 'False'
 
     return '# To be filled in manually'
@@ -159,18 +156,17 @@ def capture_memory_segment_attributes(attributes, memories):
     # lockbits are always byte accessible.
     if name in ['fuses', 'lockbits']:
         pagesize = '0x01'
-    output = ""
     # These names are the names used in the atdf files and might differ from the pymcuprog MemoryNames
     if name in ['progmem', 'flash', 'eeprom', 'user_signatures', 'fuses', 'lockbits', 'signatures', 'internal_sram', 'iram']:
         print_name = map_atdf_memory_name_to_pymcuprog_name(name)
         if not print_name in memories:
             memories[print_name] = {}
-        if  memories[print_name].get(DeviceMemoryInfoKeys.ADDRESS) == None:
+        if  memories[print_name].get(DeviceMemoryInfoKeys.ADDRESS) is None:
             memories[print_name][DeviceMemoryInfoKeys.ADDRESS] = start
-        if  memories[print_name].get(DeviceMemoryInfoKeys.SIZE) == None or \
+        if  memories[print_name].get(DeviceMemoryInfoKeys.SIZE) is None or \
             memories[print_name].get(DeviceMemoryInfoKeys.SIZE) == 'UNKNOWN':
             memories[print_name][DeviceMemoryInfoKeys.SIZE] = size
-        if  memories[print_name].get(DeviceMemoryInfoKeys.PAGE_SIZE) == None:
+        if  memories[print_name].get(DeviceMemoryInfoKeys.PAGE_SIZE) is None:
             memories[print_name][DeviceMemoryInfoKeys.PAGE_SIZE] = pagesize
 
 def capture_register_offset(name, offset):
@@ -272,7 +268,6 @@ def capture_memory_module_element(element, memories):
         dictionary
     :type memories: dict
     """
-    output = ""
     memoryname = map_atdf_memory_name_to_pymcuprog_name(element.attrib['name'])
     if not memoryname in memories:
         # Discovered new memory, add it to the dictionary
@@ -297,7 +292,7 @@ def capture_memory_module_element(element, memories):
                 # content and when erasing, even though the write granularity is one byte
                 memories[memoryname][DeviceMemoryInfoKeys.PAGE_SIZE] = rg.attrib['size']
         else:
-            if memories[memoryname].get(DeviceMemoryInfoKeys.SIZE) == None:
+            if memories[memoryname].get(DeviceMemoryInfoKeys.SIZE) is None:
                 memories[memoryname][DeviceMemoryInfoKeys.SIZE] = "UNKNOWN"
 
 def capture_signature_from_property_groups_element(element):
@@ -427,6 +422,7 @@ def determine_address_size(flash_offset):
     return address_size
 
 def harvest_from_file(filename):
+    #pylint: disable=too-many-statements,too-many-branches,too-many-locals
     """
     Harvest parameters from a file
 
@@ -502,12 +498,12 @@ def harvest_from_file(filename):
                 if elem.attrib['name'].lower() == 'dwen':
                     dwen_mask = elem.attrib['mask']
             if elem.tag == 'register-group':
-                if capture_bootrst_from_register_group(elem) != None:
+                if capture_bootrst_from_register_group(elem) is not None:
                     bootrst_fuse = capture_bootrst_from_register_group(elem)
 
 
     extra_fields += capture_field('address_size', determine_address_size(progmem_offset))
-    if not shared_updi and not ('ISP' in interfaces):
+    if not shared_updi and 'ISP' not in interfaces:
         extra_fields += capture_field(DeviceInfoKeysAvr.PROG_CLOCK_KHZ, '1800')
 
     hv_comment = None
@@ -519,7 +515,7 @@ def harvest_from_file(filename):
             hv_implementation = HV_IMPLEMENTATION_DEDICATED_UPDI
             hv_comment = f"    # Missing hv_implementation property in ATDF file\n    # Defaulting to {hv_implementation} for devices without UPDI fuse\n"
 
-    if not ('ISP' in interfaces):
+    if 'ISP' not in interfaces:
         if hv_comment:
             extra_fields += hv_comment
         extra_fields += capture_field(DeviceInfoKeysAvr.HV_IMPLEMENTATION, hv_implementation)
@@ -542,13 +538,13 @@ def harvest_from_file(filename):
         extra_fields += "    'osccal_base' : " + "0x%02X" % osccal_base + ",\n"
     if dwen_mask:
         extra_fields += "    'dwen_mask' : " + "%s" % dwen_mask + ",\n"
-    if bootrst_fuse != None:
+    if bootrst_fuse is not None:
         extra_fields += "    'bootrst_fuse' : " + "%s" % bootrst_fuse + ",\n"
-    if buf_per_page != None:
+    if buf_per_page is not None:
         extra_fields += "    'buffers_per_flash_page' : " + "%s" % buf_per_page + ",\n"
 
 
-
+    #pylint: disable=used-before-assignment
     extra_fields += capture_field(DeviceInfoKeysAvr.DEVICE_ID,
                             "0x{:02X}{:02X}{:02X}".format(signature[0], signature[1], signature[2]))
 
@@ -576,7 +572,7 @@ def harvest_from_file(filename):
                                                                          sorted_memories[memory][DeviceMemoryInfoKeys.PAGE_SIZE],
                                                                          devicename))
         output += "    '{}_{}': {},\n".format(memory, DeviceMemoryInfoKeys.CHIPERASE_EFFECT, determine_chiperase_effect(memory, architecture))
-        output += "    '{}_{}': {},\n".format(memory, DeviceMemoryInfoKeys.ISOLATED_ERASE, determine_isolated_erase(memory, architecture) and not ('ISP' in interfaces))
+        output += "    '{}_{}': {},\n".format(memory, DeviceMemoryInfoKeys.ISOLATED_ERASE, determine_isolated_erase(memory, architecture) and 'ISP' not in interfaces)
 
     output += extra_fields
     output += "    'interface': '" + '+'.join(interfaces) + "'\n"
@@ -605,17 +601,17 @@ def main():
 
     if arguments.filename.endswith('.atdf'):
         dict_content = harvest_from_file(arguments.filename)
-        if arguments.interface == None or arguments.interface.lower() in dict_content.lower:
+        if arguments.interface is None or arguments.interface.lower() in dict_content.lower:
             content = "\nfrom pymcuprog.deviceinfo.eraseflags import ChiperaseEffect\n\n"
             content += "DEVICE_INFO = {{\n{}}}".format(dict_content)
             print(content)
     else:
         for file in os.listdir(arguments.filename):
             dict_content = harvest_from_file(arguments.filename + '/' + file)
-            if arguments.interface== None or arguments.interface.lower() in dict_content.lower():
+            if arguments.interface is None or arguments.interface.lower() in dict_content.lower():
                 content = "\nfrom pymcuprog.deviceinfo.eraseflags import ChiperaseEffect\n\n"
                 content += "DEVICE_INFO = {{\n{}}}".format(dict_content)
-                with open(os.path.splitext(file)[0].lower() + '.py', 'w') as f:
+                with open(os.path.splitext(file)[0].lower() + '.py', 'w', encoding='utf-8') as f:
                     f.write(content)
 
 

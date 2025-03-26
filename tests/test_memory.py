@@ -1,8 +1,12 @@
-from unittest.mock import Mock, MagicMock, patch, call, create_autospec
+"""
+The test suit for the Memory class
+"""
+#pylint: disable=protected-access,missing-function-docstring,consider-using-f-string,invalid-name,line-too-long,missing-class-docstring,too-many-public-methods
+import logging
+from unittest.mock import Mock, MagicMock, call, create_autospec
 from unittest import TestCase
 from dwgdbserver.xavrdebugger import XAvrDebugger
-from dwgdbserver.dwgdbserver import GdbHandler, EndOfSession, FatalError, Memory, MonitorCommand, BreakAndExec, DebugWIRE, SIGINT, SIGTRAP, SIGHUP
-import logging
+from dwgdbserver.dwgdbserver import FatalError, Memory, MonitorCommand
 
 logging.basicConfig(level=logging.CRITICAL)
 
@@ -47,15 +51,15 @@ class TestMemory(TestCase):
 
     def test_readmem_sram(self):
         sram = list(reversed(range(15)))
-        def access_sram(ix, len):
-            return bytearray(sram[ix:ix+len])
+        def access_sram(ix, length):
+            return bytearray(sram[ix:ix+length])
         self.mem.dbg.sram_read = MagicMock(side_effect=access_sram)
         self.assertEqual(self.mem.readmem("800000", "4"), bytearray([14, 13, 12, 11]))
 
     def test_readmem_eprom(self):
         eeprom = list(range(5))
-        def access_eeprom(ix, len):
-            return bytearray(eeprom[ix:ix+len])
+        def access_eeprom(ix, length):
+            return bytearray(eeprom[ix:ix+length])
         self.mem.dbg.eeprom_read = MagicMock(side_effect=access_eeprom)
         self.assertEqual(self.mem.readmem("810001", "3"), bytearray([1, 2, 3]))
 
@@ -109,7 +113,7 @@ class TestMemory(TestCase):
         self.mem._flash = bytearray(range(4))
         self.mem.dbg.flash_read.return_value = bytearray(2)
         with self.assertRaises(FatalError):
-             self.mem.flash_pages()
+            self.mem.flash_pages()
 
     def test_memory_map(self):
         self.assertEqual(self.mem.memory_map(), 'l<memory-map><memory type="ram" start="0x800000" length="0x10005"/>' + \
