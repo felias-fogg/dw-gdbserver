@@ -2,7 +2,7 @@ from unittest.mock import Mock, MagicMock, patch, call, create_autospec
 from unittest import TestCase
 from dwgdbserver.xavrdebugger import XAvrDebugger
 from dwgdbserver.dwgdbserver import GdbHandler, EndOfSession, FatalError, Memory, MonitorCommand, BreakAndExec, DebugWIRE, SIGINT, SIGTRAP, SIGHUP, SIGABRT
-from dwgdbserver.util.instr import instrmap
+from .util.instr import instrmap
 import logging
 
 logging.basicConfig(level=logging.CRITICAL)
