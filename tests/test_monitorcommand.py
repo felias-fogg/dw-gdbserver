@@ -133,7 +133,3 @@ class TestMonitorCommand(TestCase):
 
     def test_dispatch_version(self):
         self.assertEqual(self.mo.dispatch(['version']), ("", "dw-gdbserver {}".format(importlib.metadata.version("dwgdbserver"))))
-        
-        
-        
-

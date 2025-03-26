@@ -42,7 +42,7 @@ class XTinyXAvrTarget(TinyXAvrTarget):
     def statreg_read(self):
         """
         Reads SREG
-        
+
         :returns: 1 Byte of SREG
         :rtype: bytearray
         """
@@ -52,7 +52,7 @@ class XTinyXAvrTarget(TinyXAvrTarget):
     def statreg_write(self, data):
         """
         Writes SREG
-        
+
         """
         self.protocol.memory_write(Avr8Protocol.AVR8_MEMTYPE_OCD,
                                        Avr8Protocol.AVR8_MEMTYPE_OCD_SREG, data)
@@ -94,7 +94,7 @@ class XTinyAvrTarget(TinyAvrTarget):
         """
         Sets up the device config for a tiny AVR device
 
-        :param device_info: Target device information as returned 
+        :param device_info: Target device information as returned
                             by deviceinfo.deviceinfo.getdeviceinfo
         :type device_info: dict
         """

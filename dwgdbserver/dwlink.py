@@ -93,7 +93,7 @@ def discover(args):
 
 def main(args):
     """
-    Main function providing an serial-to-IP bridge for the dw-link hardware debugger 
+    Main function providing an serial-to-IP bridge for the dw-link hardware debugger
     """
     #pylint: disable=too-many-statements, too-many-branches, too-many-nested-blocks
     # discover adapter

@@ -12,7 +12,7 @@ from pymcuprog.deviceinfo import deviceinfo
 from pymcuprog.nvmupdi import NvmAccessProviderCmsisDapUpdi
 from pymcuprog.pymcuprog_errors import PymcuprogToolConfigurationError,\
      PymcuprogNotSupportedError
-     
+
 from pyedbglib.protocols.avr8protocol import Avr8Protocol
 from pyedbglib.protocols.edbgprotocol import EdbgProtocol
 from pyedbglib.util import binary
@@ -81,7 +81,3 @@ class TestXAvr8Target(TestCase):
 
     def test_breakpoint_clear(self):
         self.assertEqual(self.xa.breakpoint_clear(),0)
-
-        
-
-        

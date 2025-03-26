@@ -23,13 +23,13 @@ class TestBreakAndExec(TestCase):
         self.bp.insert_breakpoint(2)
         self.bp.dbg.software_breakpoint_set.assert_called_with(2)
         self.assertFalse(bool(self.bp._bp))
-        
+
     def test_insert_breakpoint_odd(self):
         self.bp.mon.is_onlyhwbps.return_value = False
         self.bp.insert_breakpoint(3)
-        self.assertFalse(bool(self.bp._bp))        
+        self.assertFalse(bool(self.bp._bp))
         self.bp.insert_breakpoint(2)
-        self.assertTrue(bool(self.bp._bp[2]))        
+        self.assertTrue(bool(self.bp._bp[2]))
 
     def test_insert_breakpoints_regular(self):
         self.bp.mon.is_onlyhwbps.return_value = False
@@ -40,7 +40,7 @@ class TestBreakAndExec(TestCase):
                                     'opcode': 0x9598, 'secondword' : 0x1111, 'timestamp' : 1 },
                                        200:  {'inuse' : True, 'active': True, 'inflash': False, 'hwbp' : None,
                                     'opcode': 0x2222, 'secondword' : 0x3333, 'timestamp' : 2 }})
-        
+
     def test_remove_breakpoint_old_exec(self):
         self.bp.mon.is_old_exec.return_value = True
         self.bp.remove_breakpoint(2)
@@ -75,7 +75,7 @@ class TestBreakAndExec(TestCase):
         self.bp.mon.is_onlyswbps.return_value = False
         self.bp._bstamp = 6
         self.bp._bp = {100: {'inuse' : True, 'active': True, 'inflash': False, 'hwbp' : None, # will get swbp
-                                 'opcode': 0x9598, 'secondword' : 0x1111, 'timestamp' : 2 }, 
+                                 'opcode': 0x9598, 'secondword' : 0x1111, 'timestamp' : 2 },
                        200:  {'inuse' : True, 'active': False, 'inflash': True, 'hwbp' : None, # will remove swbp
                                   'opcode': 0x2221, 'secondword' : 0x3331, 'timestamp' : 5 },
                        300:  {'inuse' : True, 'active': False, 'inflash': False, 'hwbp' : 1, # will remove hwbp
@@ -99,7 +99,7 @@ class TestBreakAndExec(TestCase):
         self.bp._bstamp = 6
         self.bp._bpactive = 3
         self.bp._bp = {100: {'inuse' : True, 'active': True, 'inflash': False, 'hwbp' : 1, # will have to give up hwbp
-                                 'opcode': 0x9598, 'secondword' : 0x1111, 'timestamp' : 1 }, 
+                                 'opcode': 0x9598, 'secondword' : 0x1111, 'timestamp' : 1 },
                        200:  {'inuse' : True, 'active': False, 'inflash': True, 'hwbp' : None, # will remove swbp
                                   'opcode': 0x2221, 'secondword' : 0x3331, 'timestamp' : 2 },
                        300:  {'inuse' : True, 'active': False, 'inflash': True, 'hwbp' : None, # will remove swbp
@@ -113,7 +113,7 @@ class TestBreakAndExec(TestCase):
                                     'opcode': 0x9598, 'secondword' : 0x1111, 'timestamp' : 1 },
                                        400:  {'inuse' : True, 'active': True, 'inflash': True, 'hwbp' : None,
                                     'opcode': 0x2223, 'secondword' : 0x3333, 'timestamp' : 4 },
-                                       500:  {'inuse' : True, 'active': True, 'inflash': False, 'hwbp' : 1, 
+                                       500:  {'inuse' : True, 'active': True, 'inflash': False, 'hwbp' : 1,
                                     'opcode': 0x2224, 'secondword' : 0x3334, 'timestamp' : 5 }})
         self.assertEqual(self.bp._hw, [-1, 500 ])
         self.bp.dbg.software_breakpoint_clear.assert_has_calls([call(200), call(300)], any_order=True)
@@ -157,7 +157,7 @@ class TestBreakAndExec(TestCase):
         self.bp.mon.is_onlyswbps.return_value = False
         self.bp.mon.is_onlyhwbps.return_value = False
         self.bp._hw = [ -1, 100 ]
-        self.bp._bp[100] = {'opcode' : 0x9000, 'secondword' : 0xFFFF, 'hwbp' : 1, 'active' : True, 'timestamp' : 2, 'inflash' : False } 
+        self.bp._bp[100] = {'opcode' : 0x9000, 'secondword' : 0xFFFF, 'hwbp' : 1, 'active' : True, 'timestamp' : 2, 'inflash' : False }
         self.bp._bp[2224] = {'opcode' : 0xffb6, 'secondword' : 0xFFFF, 'hwbp' : None, 'active' : True,
                                  'timestamp' : 1, 'inflash' : None }
         self.bp.resume_execution(2224)
@@ -167,8 +167,8 @@ class TestBreakAndExec(TestCase):
         self.bp.mon.is_onlyswbps.return_value = False
         self.bp.mon.is_onlyhwbps.return_value = False
         self.bp._hw = [ -1, 100 ]
-        self.bp._bp[100] = {'opcode' : 0x9000, 'secondword' : 0xFFFF, 'hwbp' : 1, 'active' : True, 'timestamp' : 2, 'inflash' : False } 
-        self.bp._bp[2224] = {'opcode' : 0x9000, 'secondword' : 0xFFFF, 'active' : True, 'hwbp' : None, 'timestamp' : 1, 'inflash' : True} 
+        self.bp._bp[100] = {'opcode' : 0x9000, 'secondword' : 0xFFFF, 'hwbp' : 1, 'active' : True, 'timestamp' : 2, 'inflash' : False }
+        self.bp._bp[2224] = {'opcode' : 0x9000, 'secondword' : 0xFFFF, 'active' : True, 'hwbp' : None, 'timestamp' : 1, 'inflash' : True}
         self.bp.resume_execution(2224)
         self.bp.dbg.run_to.assert_called_with(100)
 
@@ -202,7 +202,7 @@ class TestBreakAndExec(TestCase):
         self.bp._read_flash_word.assert_not_called()
         self.bp.dbg.step.assert_called_once()
         self.bp.dbg.run_to.assert_not_called()
-        
+
     def test_single_step_safe_nobranch_oneWordInstr(self):
         self.bp.mon.is_onlyswbps.return_value = False
         self.bp.dbg.program_counter_read.return_value = 22
@@ -365,7 +365,7 @@ class TestBreakAndExec(TestCase):
                                  instrmap.get(instr,('None', None, None))[0][:2] == 'br' and \
                                  instrmap.get(instr,(None, None, None))[2] in ['cond', 'icond'],
                                  "Failed at 0x%04X" % instr)
-        
+
     def test_branch_on_ibit(self):
         for instr in range(0x10000):
             self.assertEqual(self.bp.branch_on_ibit(instr),
@@ -386,7 +386,7 @@ class TestBreakAndExec(TestCase):
         self.assertEqual(self.bp.compute_destination_of_ibranch(0xF7FF, 0, 20), 20)
         self.assertEqual(self.bp.compute_destination_of_ibranch(0xF42F, 1, 20), 22)
         self.assertEqual(self.bp.compute_destination_of_ibranch(0xF7FF, 1, 20), 22)
-                
+
     def test_two_word_instr(self):
         for instr in range(0x10000):
             self.assertEqual(self.bp.two_word_instr(instr),
@@ -412,9 +412,7 @@ class TestBreakAndExec(TestCase):
         self.assertEqual(self.bp.sim_two_word_instr(0x940C, 0x2244, 0x2002), 0x4488)
 
     def test_sim_two_word_instr_call_small(self):
-        self.bp.dbg.stack_pointer_read.return_value = bytearray([0x02, 0x01]) 
+        self.bp.dbg.stack_pointer_read.return_value = bytearray([0x02, 0x01])
         self.assertEqual(self.bp.sim_two_word_instr(0x940E, 0x2244, 0x2002), 0x4488)
         self.bp.dbg.stack_pointer_write.assert_called_with(bytearray([0x00, 0x01]))
         self.bp.dbg.sram_write.assert_called_with(0x101, bytearray([0x10, 0x03]))
-
-

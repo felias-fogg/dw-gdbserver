@@ -3,7 +3,7 @@ from unittest import TestCase
 import socket
 from dwgdbserver.xavrdebugger import XAvrDebugger
 from dwgdbserver.dwgdbserver import GdbHandler, EndOfSession, Memory, MonitorCommand, BreakAndExec, DebugWIRE, SIGINT, SIGTRAP, SIGHUP
-from pyedbglib.protocols.edbgprotocol import EdbgProtocol 
+from pyedbglib.protocols.edbgprotocol import EdbgProtocol
 import logging
 
 logging.basicConfig(level=logging.CRITICAL)
@@ -35,7 +35,7 @@ class TestGdbHandler(TestCase):
     def test_rsp_packet_construction(self):
         self.assertEqual(b'$#00', rsp(''))
         self.assertEqual(b'$abc#26', rsp('abc'))
-        
+
     def test_unknownPacket(self):
         self.gh.dispatch('_', b'')
         self.gh._comsocket.sendall.assert_called_with(rsp(""))
@@ -245,7 +245,7 @@ class TestGdbHandler(TestCase):
         self.gh.dispatch('qRcmd', b',7265736574')
         self.gh.dbg.reset.assert_called_once()
         self.gh._comsocket.sendall.assert_called_with(rsp("426C610A"))
-        
+
     @patch('dwgdbserver.dwgdbserver.time.sleep',Mock()) # we do not want to sleep in a test!
     def test_send_power_cycle_magic(self):
         self.gh.dbg.transport.device.product_string = 'MEDBG'
@@ -329,7 +329,7 @@ class TestGdbHandler(TestCase):
         self.gh.mon.is_dw_mode_active.return_value = False
         self.gh.dispatch('vFlashErase', b':100,10')
         self.gh._comsocket.sendall.assert_called_with(rsp("E01"))
-        
+
     def test_flashEraseHandler_fresh(self):
         self.gh._vflashdone = True
         self.gh.mon.is_dw_mode_active.return_value = True
@@ -394,16 +394,16 @@ class TestGdbHandler(TestCase):
         self.gh.mon.is_dw_mode_active.return_value = False
         self.gh.dispatch('z',b'0,111,2')
         self.gh._comsocket.sendall.assert_called_with(rsp('E01'))
-        
+
     def test_remove_breakpoint_handler_wrong_type(self):
         self.gh.mon.is_dw_mode_active.return_value = True
         self.gh.dispatch('z',b'2,111,2')
         self.gh._comsocket.sendall.assert_called_with(rsp(''))
-        
+
     def test_remove_breakpoint_handler(self):
         self.gh.mon.is_dw_mode_active.return_value = True
         self.gh.dispatch('z',b'0,222,2')
-        # note: for  breakpoints, it is always the byte address! 
+        # note: for  breakpoints, it is always the byte address!
         self.gh.bp.remove_breakpoint.assert_called_with(0x222)
         self.gh._comsocket.sendall.assert_called_with(rsp('OK'))
 
@@ -411,16 +411,16 @@ class TestGdbHandler(TestCase):
         self.gh.mon.is_dw_mode_active.return_value = False
         self.gh.dispatch('Z',b'0,111,2')
         self.gh._comsocket.sendall.assert_called_with(rsp('E01'))
-        
+
     def test_add_breakpoint_handler_wrong_type(self):
         self.gh.mon.is_dw_mode_active.return_value = True
         self.gh.dispatch('Z',b'2,111,2')
         self.gh._comsocket.sendall.assert_called_with(rsp(''))
-        
+
     def test_add_breakpoint_handler_new(self):
         self.gh.mon.is_dw_mode_active.return_value = True
         self.gh.dispatch('Z',b'0,222,2')
-        # note: for  breakpoints, it is always the byte address! 
+        # note: for  breakpoints, it is always the byte address!
         self.gh.bp.insert_breakpoint.assert_called_with(0x222)
         self.gh._comsocket.sendall.assert_called_with(rsp('OK'))
 
@@ -500,6 +500,3 @@ class TestGdbHandler(TestCase):
     def test_handle_data_wrong_checksum(self):
         self.gh.handle_data(b'$qfThreadInfo#cc')
         self.gh._comsocket.sendall.assert_called_with(b"-")
-
-
-

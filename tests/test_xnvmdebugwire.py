@@ -104,8 +104,3 @@ class TestXNvmAccessProviderCmsisDapDebugwire(TestCase):
         self.nvm.write(self.memory_info.memory_info_by_name('internal_sram'), 0x100-0x60, wpage)
         self.nvm.avr.write_memory_section.assert_has_calls([call(Avr8Protocol.AVR8_MEMTYPE_SRAM,
                                                                  0x100, wpage, len(wpage), allow_blank_skip=False)],any_order=True)
-
-        
-
-        
-

@@ -2,7 +2,7 @@
 
 ### What is it good for?
 
-This Python script acts as a [gdbserver](https://sourceware.org/gdb/current/onlinedocs/gdb.html/Server.html#Server) for [*debugWIRE*](https://debugwire.de) MCUs, such as the ATmega328P.  It can communicate with Microchip debuggers such as [Atmel-ICE](https://www.microchip.com/en-us/development-tool/atatmel-ice) and [MPLAB SNAP](https://www.microchip.com/en-us/development-tool/pg164100) (in AVR mode), and it provides a pass-through service for the DIY hardware debugger [dw-link](https://github.com/felias-fogg/dw-link). For Microchip debuggers, it uses the infrastructure provided by [pymcuprog](https://github.com/microchip-pic-avr-tools/pymcuprog) and [pyedgblib](https://github.com/microchip-pic-avr-tools/pyedbglib) to implement a full-blown gdbserver. 
+This Python script acts as a [gdbserver](https://sourceware.org/gdb/current/onlinedocs/gdb.html/Server.html#Server) for [*debugWIRE*](https://debugwire.de) MCUs, such as the ATmega328P.  It can communicate with Microchip debuggers such as [Atmel-ICE](https://www.microchip.com/en-us/development-tool/atatmel-ice) and [MPLAB SNAP](https://www.microchip.com/en-us/development-tool/pg164100) (in AVR mode), and it provides a pass-through service for the DIY hardware debugger [dw-link](https://github.com/felias-fogg/dw-link). For Microchip debuggers, it uses the infrastructure provided by [pymcuprog](https://github.com/microchip-pic-avr-tools/pymcuprog) and [pyedgblib](https://github.com/microchip-pic-avr-tools/pyedbglib) to implement a full-blown gdbserver.
 
 By the way, switching to AVR mode in the SNAP debugger is easily accomplished by using avrdude (>= Version 7.3):
 
@@ -22,7 +22,7 @@ Install the script with pipx like this:
 
 ### Usage
 
-If your target board is an Arduino board, you most probably have to first modify it by [disconnecting the capacitor](https://debugwire.de/arduino-boards/#requirements-on-the-electrical-characteristics-of-the-reset-line) that is responsible for the auto-reset feature. 
+If your target board is an Arduino board, you most probably have to first modify it by [disconnecting the capacitor](https://debugwire.de/arduino-boards/#requirements-on-the-electrical-characteristics-of-the-reset-line) that is responsible for the auto-reset feature.
 
 Once you have connected an appropriate hardware debugger to your target board, you can start the  gdbserver in a terminal window:
 
@@ -80,7 +80,7 @@ Note: automatically using hardware breakpoints for read-only addresses.
 
 ### How to get into and out of debugWIRE mode
 
-When the MCU is not already in debugWIRE mode,  you must request the switch to debugWIRE mode using the command `monitor debugwire enable` in GDB. The debugger will then enable the DWEN fuse and either power-cycles the target by itself (if possible) or ask you to power-cycle the target system. Once this is done, the chip will stay in debugWIRE mode, even after terminating the debugging session. In other words, when starting the next debug session, the MCU is already in debugWIRE mode. You can switch back to normal mode using the command `monitor debugwire disable` before leaving the debugger. 
+When the MCU is not already in debugWIRE mode,  you must request the switch to debugWIRE mode using the command `monitor debugwire enable` in GDB. The debugger will then enable the DWEN fuse and either power-cycles the target by itself (if possible) or ask you to power-cycle the target system. Once this is done, the chip will stay in debugWIRE mode, even after terminating the debugging session. In other words, when starting the next debug session, the MCU is already in debugWIRE mode. You can switch back to normal mode using the command `monitor debugwire disable` before leaving the debugger.
 
 ### Monitor commands
 
@@ -102,7 +102,7 @@ In addition to the above mentioned command for enabling debugWIRE mode, there ar
 | `monitor verify` [`enable`\|`disable`]                | Verify flash after loading each flash page. The cost for verifying is negligible, and doing so might diagnose flash wear problems. The default is that this option is *enabled*. |
 | `monitor version`                                     | Show version of the gdbserver.                               |
 
-The default setting is always the first one listed, except for `debugwire`, which depends on the MCU itself. All commands can, as usual, be abbreviated. For example, `mo d e` is equivalent to `monitor debugwire enable`. 
+The default setting is always the first one listed, except for `debugwire`, which depends on the MCU itself. All commands can, as usual, be abbreviated. For example, `mo d e` is equivalent to `monitor debugwire enable`.
 
 ### List of supported and tested hardware debuggers
 
@@ -141,12 +141,12 @@ This is the list of all debugWIRE MCUs, which should all be compatible with dw-g
 
 #### ATmegas (covered by MiniCore):
 
-* <s>__ATmega48__</s>, __ATmega48A__, __ATmega48PA__, ATmega48PB, 
-* <s>__ATmega88__</s>, __ATmega88A__, __ATmega88PA__, Atmega88PB, 
-* __ATmega168__, __ATmega168A__, __ATmega168PA__, ATmega168PB, 
+* <s>__ATmega48__</s>, __ATmega48A__, __ATmega48PA__, ATmega48PB,
+* <s>__ATmega88__</s>, __ATmega88A__, __ATmega88PA__, Atmega88PB,
+* __ATmega168__, __ATmega168A__, __ATmega168PA__, ATmega168PB,
 * **ATmega328**, __ATmega328P__, **ATmega328PB**
 
-The ATmega48 and ATmega88 (without the A-suffix) sitting on my desk suffer from stuck-at-one bits in the program counter and are, therefore, not debuggable by GDB. I suspect that this applies to all chips labelled this way. In any case, the test for stuck-at-one-bits is made when connecting to the chips. 
+The ATmega48 and ATmega88 (without the A-suffix) sitting on my desk suffer from stuck-at-one bits in the program counter and are, therefore, not debuggable by GDB. I suspect that this applies to all chips labelled this way. In any case, the test for stuck-at-one-bits is made when connecting to the chips.
 
 #### Other ATmegas:
 
@@ -205,7 +205,6 @@ sudo chmod a+rw /dev/ttyACM0
 
 ### What the future has in store for us
 
-The script has all the basic functionality but still needs some polishing. 
+The script has all the basic functionality but still needs some polishing.
 
 I also plan to provide binaries, which can be used as tools for the Arduino IDE 2. And if it all works, it is only a tiny step to generalize it to the JTAG and UPDI AVR MCUs. So, stay tuned.
-

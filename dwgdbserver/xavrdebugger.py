@@ -106,7 +106,7 @@ class XAvrDebugger(AvrDebugger):
         """
         Writes the stack pointer
 
-        :param data: 2 bytes representing stackpointer in little endian 
+        :param data: 2 bytes representing stackpointer in little endian
         :type: bytearray
         """
         self.logger.debug("Writing stack pointer")

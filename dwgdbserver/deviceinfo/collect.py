@@ -47,10 +47,10 @@ def main():
                 else:
                     dev_name[id] = name + "/" + oldname
                 dev_iface[id] = iface
-    
+
     print('dev_id =', dev_id)
     print('dev_name =', dev_name)
     print('dev_iface =', dev_iface)
-    
+
 if __name__ == "__main__":
     main()

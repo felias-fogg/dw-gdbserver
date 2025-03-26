@@ -334,7 +334,7 @@ def capture_bootrst_from_register_group(element):
             if bf.attrib['name'].lower() == 'bootrst':
                 return off
     return None
-    
+
 
 def get_flash_offset(element):
     """
@@ -456,7 +456,7 @@ def harvest_from_file(filename):
     dwen_mask = None
     bootrst_fuse = None
     buf_per_page = None
-    
+
     memories = {}
     for event, elem in xml_iter:
         if event == 'end':
@@ -504,7 +504,7 @@ def harvest_from_file(filename):
             if elem.tag == 'register-group':
                 if capture_bootrst_from_register_group(elem) != None:
                     bootrst_fuse = capture_bootrst_from_register_group(elem)
-                
+
 
     extra_fields += capture_field('address_size', determine_address_size(progmem_offset))
     if not shared_updi and not ('ISP' in interfaces):
@@ -546,9 +546,9 @@ def harvest_from_file(filename):
         extra_fields += "    'bootrst_fuse' : " + "%s" % bootrst_fuse + ",\n"
     if buf_per_page != None:
         extra_fields += "    'buffers_per_flash_page' : " + "%s" % buf_per_page + ",\n"
-    
-        
-    
+
+
+
     extra_fields += capture_field(DeviceInfoKeysAvr.DEVICE_ID,
                             "0x{:02X}{:02X}{:02X}".format(signature[0], signature[1], signature[2]))
 
@@ -618,7 +618,7 @@ def main():
                 with open(os.path.splitext(file)[0].lower() + '.py', 'w') as f:
                     f.write(content)
 
-            
+
 
 if __name__ == "__main__":
     main()

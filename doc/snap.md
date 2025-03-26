@@ -8,4 +8,3 @@
 | **6**     |                                                        | **<span style="text-decoration:overline">RESET</span>** | **<span style="text-decoration:overline">RESET</span>** | **dW**     | **(CLK)**      | **RST** |
 | **7**     |                                                        | **TDI**                                                 | **MOSI**                                                |            |                |         |
 | **8**     | **SWDIO**                                              | **TMS**                                                 |                                                         |            |                |         |
-

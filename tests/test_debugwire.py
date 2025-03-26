@@ -19,9 +19,9 @@ class TestDebugWire(TestCase):
         self.dw.dbg.device = MagicMock()
         self.dw.dbg.memory_info = MagicMock()
         self.dw.dbg.transport = MagicMock()
-        self.dw.dbg.device.read_device_id.return_value = bytearray([0x0F, 0x95]) # atmega328p        
+        self.dw.dbg.device.read_device_id.return_value = bytearray([0x0F, 0x95]) # atmega328p
         mock_nvm = create_autospec(XNvmAccessProviderCmsisDapDebugwire, spec_set=False, instance=True)
-        
+
     def test_warm_start_not_ready(self):
         self.dw.dbg.device_info.__getitem__.return_value = 0x1E9514
         self.dw.dbg.setup_session.side_effect=Mock(side_effect=Exception("Test"))
@@ -70,7 +70,7 @@ class TestDebugWire(TestCase):
         self.assertEqual(self.dw.power_cycle(Mock(return_value=True)), None)
         self.dw.dbg.housekeeper.end_session.assert_not_called()
         read_target_voltage.assert_not_called()
-        
+
     @patch('dwgdbserver.dwgdbserver.pymcuprog.utils.read_voltage_parameter',
                Mock(side_effect=[5,5,5,0,0,0,0,0,5,5,5,5]))
     @patch('dwgdbserver.dwgdbserver.time.sleep', Mock())
@@ -106,5 +106,3 @@ class TestDebugWire(TestCase):
         self.dw.spidevice.write.assert_called()
         self.dw.spidevice.isp.leave_progmode.assert_called()
         self.dw.spidevice.isp.enter_progmode.assert_called()
-    
-

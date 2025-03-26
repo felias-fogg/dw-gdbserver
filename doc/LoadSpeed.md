@@ -14,4 +14,4 @@ Load speed is measured in kB/sec. The measurement was done on an M2 Mac.
 
 The first number is the speed when using a load function that does not check whether the content is already loaded. The second number is the speed for a load function that reads before it writes in case everything is already loaded. One could also consider this as verification speed. The actual speed will lie between these two numbers.
 
-dw-link (H) means dw-link using the high-speed option (250kbps) for communication with the OCD. The Microchip debuggers, except for the XPLAINED, apparently also use such an option. The UNO bootloader number means it programs an Uno with 7kB/sec and reads it back with 10kB/sec. 
+dw-link (H) means dw-link using the high-speed option (250kbps) for communication with the OCD. The Microchip debuggers, except for the XPLAINED, apparently also use such an option. The UNO bootloader number means it programs an Uno with 7kB/sec and reads it back with 10kB/sec.

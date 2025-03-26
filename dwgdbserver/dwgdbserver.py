@@ -416,8 +416,8 @@ class GdbHandler():
 
     def _supported_handler(self, _):
         """
-        'qSupported': query for features supported by the gbdserver; in our case 
-        packet size and memory map. Because this is also the command send after a 
+        'qSupported': query for features supported by the gbdserver; in our case
+        packet size and memory map. Because this is also the command send after a
         connection with 'target remote' is made,
         we will try to establish a connection to the debugWIRE target.
         """
@@ -756,8 +756,8 @@ class GdbHandler():
     def handle_data(self, data):
     #pylint: disable=too-many-nested-blocks, too-many-branches
         """
-        Analyze the incomming data stream from GDB. Allow more than one RSP record 
-        per packet, although this should not be necessary because each packet needs 
+        Analyze the incomming data stream from GDB. Allow more than one RSP record
+        per packet, although this should not be necessary because each packet needs
         to be acknowledged by a '+' from us.
         """
         while data:
@@ -863,7 +863,7 @@ class Memory():
 
     def readmem(self, addr, size):
         """
-        Read a chunk of memory and return a bytestring or bytearray. 
+        Read a chunk of memory and return a bytestring or bytearray.
         The parameter addr and size should be hex strings.
         """
         iaddr, method, _ = self.mem_area(addr)
@@ -872,7 +872,7 @@ class Memory():
 
     def writemem(self, addr, data):
         """
-        Write a chunk of memory and return a reply string. 
+        Write a chunk of memory and return a reply string.
         The parameter addr and size should be hex strings.
         """
         iaddr, _, method = self.mem_area(addr)
@@ -885,8 +885,8 @@ class Memory():
 
     def mem_area(self, addr):
         """
-        This function returns a triple consisting of the real address as an int, the read, 
-        and the write method. If illegal address section, report and return 
+        This function returns a triple consisting of the real address as an int, the read,
+        and the write method. If illegal address section, report and return
         (0, lambda *x: bytes(), lambda *x: False)
         """
         addr_section = "00"
@@ -1097,12 +1097,12 @@ class BreakAndExec():
 
     def update_breakpoints(self, reserved):
         """
-        This is called directly before execution is started. It will remove 
-        inactive breakpoints, will assign the hardware breakpoints to the most 
-        recently added breakpoints, and request to set active breakpoints into flash, 
-        if they not there already. The reserved argument states how many HWBPs should 
+        This is called directly before execution is started. It will remove
+        inactive breakpoints, will assign the hardware breakpoints to the most
+        recently added breakpoints, and request to set active breakpoints into flash,
+        if they not there already. The reserved argument states how many HWBPs should
         be reserved for single- or range-stepping. The method will return False
-        when at least one BP cannot be activated due to resource restrictions 
+        when at least one BP cannot be activated due to resource restrictions
         (e.g., not enough HWBPs).
         """
         # remove inactive BPs and de-allocate BPs that are now forbidden
@@ -1155,8 +1155,8 @@ class BreakAndExec():
 
     def remove_inactive_and_deallocate_forbidden_bps(self, reserved):
         """
-        Remove all inactive BPs and deallocate BPs that are forbidden 
-        (after changing BP preference). Return False if a non-existant 
+        Remove all inactive BPs and deallocate BPs that are forbidden
+        (after changing BP preference). Return False if a non-existant
         HWBP shall be cleared.
         """
         self.logger.debug("Deallocate forbidden BPs and remove inactive ones")
@@ -1238,15 +1238,15 @@ class BreakAndExec():
 
     def single_step(self, addr):
         """
-        Perform a single step. If at the current location, there is a software breakpoint, 
-        we simulate a two-word instruction or ask the hardware debugger to do a single step 
+        Perform a single step. If at the current location, there is a software breakpoint,
+        we simulate a two-word instruction or ask the hardware debugger to do a single step
         if it is a one-word instruction. The simulation saves two flash reprogramming operations.
-        If mon._safe is true, it means that we will make every effort to not end up in the 
-        interrupt vector table. For all straight-line instructions, we will use the hardware 
-        breakpoint to break after one step. If an interrupt occurs, we may break in the ISR, 
-        if there is a breakpoint, or we will not notice it at all. For all remaining instruction 
+        If mon._safe is true, it means that we will make every effort to not end up in the
+        interrupt vector table. For all straight-line instructions, we will use the hardware
+        breakpoint to break after one step. If an interrupt occurs, we may break in the ISR,
+        if there is a breakpoint, or we will not notice it at all. For all remaining instruction
         (except those branching on the I-bit), we clear the I-bit before and set it
-        afterwards (if necessary). For those branching on the I-Bit, we will evaluate and 
+        afterwards (if necessary). For those branching on the I-Bit, we will evaluate and
         then set the hardware BP.
         """
         if addr:
@@ -1507,8 +1507,8 @@ class BreakAndExec():
 
     def sim_two_word_instr(self, opcode, secondword, addr):
         """
-        Simulate a two-word instruction with opcode and 2nd word secondword. 
-        Update all registers (except PC) and return the (byte-) address 
+        Simulate a two-word instruction with opcode and 2nd word secondword.
+        Update all registers (except PC) and return the (byte-) address
         where execution will continue.
         """
         if (opcode & ~0x1F0) == 0x9000: # lds
@@ -1676,7 +1676,7 @@ class MonitorCommand():
 
     def dispatch(self, tokens):
         """
-        Dispatch according to tokens. First element is 
+        Dispatch according to tokens. First element is
         the monitor command.
         """
         if not tokens:
@@ -1909,9 +1909,9 @@ Single-stepping:          """ + ("safe" if self._safe else "interruptible"))
 class DebugWIRE():
     """
     This class takes care of attaching to and detaching from a debugWIRE target, which is a bit
-    complicated. The target is either in ISP or debugWIRE mode and the transition from ISP to 
-    debugWIRE involves power-cycling the target, which one would not like to do every time 
-    connecting to the target. Further, if one does this transition, it is necessary to restart 
+    complicated. The target is either in ISP or debugWIRE mode and the transition from ISP to
+    debugWIRE involves power-cycling the target, which one would not like to do every time
+    connecting to the target. Further, if one does this transition, it is necessary to restart
     the debugging tool by a housekeeping end_session/start_session sequence.
     """
     def __init__(self, dbg, devicename):
@@ -1922,8 +1922,8 @@ class DebugWIRE():
 
     def warm_start(self, graceful=True):
         """
-        Try to establish a connection to the debugWIRE OCD. If not possible 
-        (because we are still in ISP mode) and graceful=True, the function returns false, 
+        Try to establish a connection to the debugWIRE OCD. If not possible
+        (because we are still in ISP mode) and graceful=True, the function returns false,
         otherwise true. If not graceful, an exception is thrown when we are
         unsuccessul in establishing the connection.
         """
@@ -1969,10 +1969,10 @@ class DebugWIRE():
 
     def cold_start(self, graceful=False, callback=None, allow_erase=True):
         """
-        On the assumption that we are in ISP mode, first DWEN is programmed, 
+        On the assumption that we are in ISP mode, first DWEN is programmed,
         then a power-cycle is performed and finally, we enter debugWIRE mode.
         If graceful is True, we allow for a failed attempt to connect to
-        the ISP core assuming that we are already in debugWIRE mode. If 
+        the ISP core assuming that we are already in debugWIRE mode. If
         callback is Null or returns False, we wait for a manual power cycle.
         Otherwise, we assume that the callback function does the job.
         """
@@ -2110,7 +2110,7 @@ class DebugWIRE():
 # pylint: disable=too-many-instance-attributes
 class AvrGdbRspServer():
     """
-    This is the GDB RSP server, setting up the connection to the GDB, reading 
+    This is the GDB RSP server, setting up the connection to the GDB, reading
     and responding, and terminating. The important part is calling the handle_data
     method of the handler.
     """

@@ -116,4 +116,3 @@ class TestMemory(TestCase):
                              '<memory type="flash" start="0x0" length="0xC">' + \
                              '<property name="blocksize">0x6</property>' + \
                              '</memory></memory-map>')
-
