@@ -65,7 +65,7 @@ Note: automatically using hardware breakpoints for read-only addresses.
 
 ### Command line options
 
-| Optionname           | Descripion                                                   |
+| Optionname           | Description                                                   |
 | -------------------- | ------------------------------------------------------------ |
 | `--device` <br>`-d`  | The argument to this option specifies the MCU type of the target chip in lower case.  This option is mandatory. If a '?' mark is given, all supported MCUs are listed. |
 | `--gede`<br>`-g`     | No argument for this option. This option will start the `Gede` debugger GUI. |

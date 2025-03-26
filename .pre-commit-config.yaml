@@ -5,5 +5,40 @@ repos:
   - id: check-ast
   - id: check-illegal-windows-names
   - id: check-toml
-  - id: end-of-file-fixer
   - id:	trailing-whitespace
+- repo: https://github.com/codespell-project/codespell
+  rev: v2.3.0
+  hooks:
+  - id: codespell
+    name: codespell
+    args: [ "--exclude-file=tests/util/all.lst,poetry.lock", "-L ser, RCALL" ]
+- repo: local
+  hooks:
+  - id: pylint
+    name: pylint
+    entry: poetry run pylint
+    language: python
+    types: [python]
+    require_serial: true
+    args:
+      [
+        "-rn", # Only display messages
+        "-sn", # Don't display the score
+	"--ignore-pattern=(test_.*\\.py)|(at(tiny|mega|90).*\\.py)",
+	"--ignore=makeimap.py,instr.py,harvest.py,alldevices.py,collect.py",
+	"--disable=similarities,import-error"
+      ]
+    additional_dependencies:
+      - pyedbglib
+      - pymcuprog
+  - id: unittest
+    name: unittest
+    entry: poetry run python -m unittest discover
+    language: python
+    types: [python]
+    args: []
+    pass_filenames: false
+    additional_dependencies:
+      [ pyedbglib==2.24.2.18,
+        pymcuprog==3.17.3.45,
+      ]

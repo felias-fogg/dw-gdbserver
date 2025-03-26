@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+#pylint: skip-file
 """
 Read the file given as an argument and return a dict called instrmap that
 maps each opcode to a memonic (if legal). The file contains an assembler listing

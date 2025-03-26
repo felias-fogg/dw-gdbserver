@@ -15,7 +15,7 @@ def main():
         description=textwrap.dedent('''\
     Collects data of all devices stored in a Python file in the folder given as an argument.
     Three dictionaries are created, dev_ids, mapping device names to ids, dev_names mapping ids to names,
-    and dev_iface, which maps ids to interaces.
+    and dev_iface, which maps ids to interfaces.
         '''))
 
     parser.add_argument("filename",

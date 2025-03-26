@@ -58,7 +58,7 @@
 
 ### V1.0.0 (24-Feb-2025)
 
-- First "offical" version, published on PyPi
+- First "official" version, published on PyPi
 
 ### V0.9.16 (24-Feb-2025)
 

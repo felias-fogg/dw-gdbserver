@@ -136,7 +136,7 @@ class GdbHandler():
         """
         '!': GDB tries to switch to extended remote mode and we accept
         """
-        self.logger.debug("RSP packet: set exteded remote")
+        self.logger.debug("RSP packet: set extended remote")
         self._extended_remote_mode = True
         self.send_packet("OK")
 
@@ -197,7 +197,7 @@ class GdbHandler():
             regs = self.dbg.register_file_read()
             sreg = self.dbg.status_register_read()
             sp = self.dbg.stack_pointer_read()
-            # get PC as word adress and make a byte address
+            # get PC as word address and make a byte address
             pc = self.dbg.program_counter_read() << 1
             reg_string = ""
             for reg in regs:
@@ -746,7 +746,7 @@ class GdbHandler():
                 return
             sreg = self.dbg.status_register_read()[0]
             spl, sph = self.dbg.stack_pointer_read()
-            # get PC as word adress and make a byte address
+            # get PC as word address and make a byte address
             pc = self.dbg.program_counter_read() << 1
             pcstring = binascii.hexlify(pc.to_bytes(4,byteorder='little')).decode('ascii')
             stoppacket = "T{:02X}20:{:02X};21:{:02X}{:02X};22:{};thread:1;".\
@@ -756,7 +756,7 @@ class GdbHandler():
     def handle_data(self, data):
     #pylint: disable=too-many-nested-blocks, too-many-branches
         """
-        Analyze the incomming data stream from GDB. Allow more than one RSP record
+        Analyze the incoming data stream from GDB. Allow more than one RSP record
         per packet, although this should not be necessary because each packet needs
         to be acknowledged by a '+' from us.
         """
@@ -819,10 +819,10 @@ class Memory():
     and for managing the flash cache.
 
     Flash cache is implemented as a growing bytearray. We start always at 0x0000 and fill empty
-    spaces by 0xFF. _flashmem_start_prog points always to the first adddress from which we need to
-    programm flash memory. Neither the end of the flash cache nor _flashmem_start_prog need to be
+    spaces by 0xFF. _flashmem_start_prog points always to the first address from which we need to
+    program flash memory. Neither the end of the flash cache nor _flashmem_start_prog need to be
     aligned with multi_page_size (page_size multiplied by buffers_per_flash_page).
-    When programming, we will restart at a lower adderess or add 0xFF at the end.
+    When programming, we will restart at a lower address or add 0xFF at the end.
     """
 
     def __init__(self, dbg, mon):
@@ -942,7 +942,7 @@ class Memory():
 
     def flash_write(self, addr, data):
         """
-        This writes an abitrary chunk of data to flash. If addr is lower than len(self._flash),
+        This writes an arbitrary chunk of data to flash. If addr is lower than len(self._flash),
         the cache is cleared. This should do the right thing when loading is implemented with
         X-records.
         """
@@ -1079,7 +1079,7 @@ class BreakAndExec():
     def remove_breakpoint(self, address):
         """
         Will mark a breakpoint as non-active, but it will stay in flash memory or marked as a hwbp.
-        This method is called immmediately after execution is stopped.
+        This method is called immediately after execution is stopped.
         """
         if address % 2 != 0:
             self.logger.error("Breakpoint at odd address: 0x%X", address)
@@ -1126,7 +1126,7 @@ class BreakAndExec():
                 hbp['hwbp'] = self._hw.index(None)
                 self._hw[self._hw.index(None)] = h
                 if hbp['hwbp'] and hbp['hwbp'] > 1:
-                    self.logger.error("Trying to set non-existant HWBP %s", hbp['hwbp'])
+                    self.logger.error("Trying to set non-existent HWBP %s", hbp['hwbp'])
             else: # steal hwbp from oldest HWBP
                 self.logger.debug("Trying to steal HWBP")
                 stealbps = sorted(self._bp.items(), key=lambda entry: entry[1]['timestamp'])
@@ -1134,7 +1134,7 @@ class BreakAndExec():
                     if sbp['hwbp']:
                         self.logger.debug("BP at 0x%X is a HWBP", s)
                         if sbp['hwbp'] > 1:
-                            self.logger.error("Trying to clear non-existant HWBP %s", sbp['hwbp'])
+                            self.logger.error("Trying to clear non-existent HWBP %s", sbp['hwbp'])
                             # self.dbg.hardware_breakpoint_clear(steal[s][1]['hwbp']-1)
                             # not yet implemented
                             return False
@@ -1156,7 +1156,7 @@ class BreakAndExec():
     def remove_inactive_and_deallocate_forbidden_bps(self, reserved):
         """
         Remove all inactive BPs and deallocate BPs that are forbidden
-        (after changing BP preference). Return False if a non-existant
+        (after changing BP preference). Return False if a non-existent
         HWBP shall be cleared.
         """
         self.logger.debug("Deallocate forbidden BPs and remove inactive ones")
@@ -1166,7 +1166,7 @@ class BreakAndExec():
                 if bp['hwbp'] > 1: # this is a real HWBP
                     # self.dbg.hardware_breakpoint_clear(self._bp[a]['hwbp']-1)
                     # not yet implemented
-                    self.logger.error("Trying to clear non-existant HWBP %s", bp['hwbp'])
+                    self.logger.error("Trying to clear non-existent HWBP %s", bp['hwbp'])
                     return False
                 bp['hwbp'] = None
                 self._hw = [-1] + [None]*self._hwbps # entries start at 1
@@ -1179,7 +1179,7 @@ class BreakAndExec():
                 if bp['hwbp'] > 1: # this is a real HWBP
                     # self.dbg.hardware_breakpoint_clear(self._bp[a]['hwbp']-1)
                     # not yet implemented
-                    self.logger.error("Trying to clear non-existant HWBP %s",
+                    self.logger.error("Trying to clear non-existent HWBP %s",
                                           bp['hwbp'])
                     return False
                 self._hw[bp['hwbp']] = None
@@ -1194,7 +1194,7 @@ class BreakAndExec():
                     if bp['hwbp'] > 1: # this is a real HWBP
                         # self.dbg.hardware_breakpoint_clear(self._bp[a]['hwbp']-1)
                         # not yet implemented
-                        self.logger.error("Trying to clear non-existant HWBP %s",
+                        self.logger.error("Trying to clear non-existent HWBP %s",
                                               bp['hwbp'])
                         return False
                     self._hw[bp['hwbp']] = None
@@ -1356,7 +1356,7 @@ class BreakAndExec():
     def build_range(self, start, end):
         #pylint: disable=too-many-branches
         """
-        Collect all instructions in the range and anaylze them. Find all points, where
+        Collect all instructions in the range and analyze them. Find all points, where
         an instruction possibly leaves the range. This includes the first instruction
         after the range, provided it is reachable. These points are remembered in
         self._range_exit. If the number of exits is less than or equal to the number of
@@ -1488,7 +1488,7 @@ class BreakAndExec():
     def compute_destination_of_ibranch(opcode, ibit, addr):
         """
         Interprets BRIE/BRID instructions and computes the target instruction.
-        This is used to simulate the execution of theses two instructions.
+        This is used to simulate the execution of these two instructions.
         """
         branch = ibit ^ bool(opcode & 0x0400 != 0)
         if not branch:
@@ -1498,7 +1498,7 @@ class BreakAndExec():
     @staticmethod
     def two_word_instr(opcode):
         """
-        Returns True iff instruction is a two-word intruction
+        Returns True iff instruction is a two-word instruction
         """
         return(((opcode & ~0x01F0) == 0x9000) or # lds
                ((opcode & ~0x01F0) == 0x9200) or # sts
@@ -1614,7 +1614,7 @@ class MonitorCommand():
 
     def set_dw_mode_active(self):
         """
-        Sets the dw activated mode to True and remebers that dw has been
+        Sets the dw activated mode to True and remembers that dw has been
         activated once
         """
         self._dw_mode_active = True
@@ -1622,7 +1622,7 @@ class MonitorCommand():
 
     def is_fastload(self):
         """
-        Returns True iff read-before-write is enabled for the laod function
+        Returns True iff read-before-write is enabled for the load function
         """
         return self._fastload
 
@@ -1705,7 +1705,7 @@ class MonitorCommand():
         return("", "Unknown 'monitor' command")
 
     def _mon_ambigious(self, _):
-        return("", "Ambigious 'monitor' command")
+        return("", "Ambiguous 'monitor' command")
 
     # pylint: disable=too-many-return-statements
     def _mon_breakpoints(self, tokens):
@@ -2258,7 +2258,7 @@ def main():
     if args.verbose.upper() != "DEBUG":
         # suppress messages from hidtransport
         getLogger('pyedbglib.hidtransport.hidtransportbase').setLevel(logging.CRITICAL)
-        # supress spurious error messages from pyedbglib
+        # suppress spurious error messages from pyedbglib
         getLogger('pyedbglib.protocols').setLevel(logging.CRITICAL)
         # suppress errors of not connecting: It is intended!
         getLogger('pymcuprog.nvm').setLevel(logging.CRITICAL)

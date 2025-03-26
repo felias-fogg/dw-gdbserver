@@ -1,2 +1,2 @@
 [tool.pylint.MASTER]
-ignore=deviceinfo,util
+ignore=deviceinfo,tests,devices

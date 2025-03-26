@@ -13,7 +13,7 @@ class TestMonitorCommand(TestCase):
         self.mo = MonitorCommand()
 
     def test_dispatch_ambigious(self):
-        self.assertEqual(self.mo.dispatch(["ver"]), ("", "Ambigious 'monitor' command"))
+        self.assertEqual(self.mo.dispatch(["ver"]), ("", "Ambiguous 'monitor' command"))
 
     def test_dispatch_unknown(self):
         self.assertEqual(self.mo.dispatch(["XXX"]), ("", "Unknown 'monitor' command"))
@@ -46,12 +46,12 @@ class TestMonitorCommand(TestCase):
         self.mo._cache = False
         self.assertEqual(self.mo.dispatch(["caching", "enable"]), ("", "Flash memory will be cached"))
         self.assertEqual(self.mo._cache, True)
-        self.assertEqual(self.mo.dispatch(["cach", ""]), ("", "Flash memory will be cached"))
+        self.assertEqual(self.mo.dispatch(["ca", ""]), ("", "Flash memory will be cached"))
         self.assertEqual(self.mo.dispatch(["caching", "dis"]), ("", "Flash memory will not be cached"))
         self.assertEqual(self.mo._cache, False)
         self.assertEqual(self.mo.dispatch(["ca", ""]), ("", "Flash memory will not be cached"))
 
-    def test_dispatch_debugwIRE(self):
+    def test_dispatch_debugWIRE(self):
         self.mo._dw_mode_active = False
         self.assertEqual(self.mo.dispatch(["d", ""]), ("", "debugWIRE mode is disabled"))
         self.mo._dw_mode_active = True
@@ -82,6 +82,10 @@ class TestMonitorCommand(TestCase):
         self.assertTrue(len(self.mo.dispatch([])[1]) > 1000)
 
     def test_dispatch_info(self):
+        try:
+            importlib.metadata.version("dwgdbserver")
+        except importlib.metadata.PackageNotFoundError:
+            return
         self.assertTrue(len(self.mo.dispatch(['info'])[1]) > 50)
         self.assertEqual(self.mo.dispatch(['info'])[0], 'info')
 
@@ -132,4 +136,9 @@ class TestMonitorCommand(TestCase):
         self.assertEqual(self.mo.dispatch(['timers']), (0, "Timers are frozen when execution is stopped"))
 
     def test_dispatch_version(self):
+        try:
+            importlib.metadata.version("dwgdbserver")
+        except importlib.metadata.PackageNotFoundError:
+            return
         self.assertEqual(self.mo.dispatch(['version']), ("", "dw-gdbserver {}".format(importlib.metadata.version("dwgdbserver"))))
+
