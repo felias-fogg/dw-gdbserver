@@ -14,15 +14,36 @@ With PICkit4 it is similar. When you repeat this command, and you get the messag
 
 ### Installation
 
-Install the script with pipx like this:
+Install the script with [pipx](https://pipx.pypa.io/stable/installation/) like this. After that, you can call the script as it were an executable in your account (see below).
 
 ```
 > pipx install dwgdbserver
 ```
 
+Alternatively, you can download/clone the GitHub repository. You need then to install the package poetry:
+
+```
+> pipx install poetry
+```
+
+With that you can start executing the script inside the downloaded folder as follows:
+
+```
+> poetry install
+> poetry run dw-gdbserver ...
+```
+
+Furthermore, you can create a binary standalone package as follows:
+
+```
+> poetry run pyinstaller dw-gdbserver.spec
+```
+
+After that, you find an executable `dw-gdbserver` (or `dw-gdbserver.exe`) in the directory `dist/dw-gdbserver/dw-gdbserver/` together with the folder `dw-gdbserver-util`. You can copy those to a place in your `PATH`.
+
 ### Usage
 
-If your target board is an Arduino board, you most probably have to first modify it by [disconnecting the capacitor](https://debugwire.de/arduino-boards/#requirements-on-the-electrical-characteristics-of-the-reset-line) that is responsible for the auto-reset feature.
+If your target board is an Arduino board, you probably have to modify it by disconnecting the capacitor responsible for the auto-reset feature.
 
 Once you have connected an appropriate hardware debugger to your target board, you can start the  gdbserver in a terminal window:
 
@@ -95,7 +116,7 @@ In addition to the above mentioned command for enabling debugWIRE mode, there ar
 | `monitor info`                                        | Display information about the target and the state of the debugger. |
 | `monitor load` [`readbeforewrite`\|`writeonly`]       | When loading an executable, either each flash page is compared with the content to be loaded, and flashing is skipped if the content is already there, or each flash page is written without reading the current contents beforehand. The first option is the default option and there is no reason to change it. |
 | `monitor onlyloaded` [`enable`\|`disable`]            | Execution is only possible when a `load` command was previously executed, which is the default. If you want to start execution without previously loading an executable, you need to disable this mode. |
-| `monitor rangestepping `[`enable`|`disable`]          | Allow for range-stepping.                                    |
+| `monitor rangestepping `[`enable`\|`disable`]         | The GDB range-stepping command is supported or disabled.     |
 | `monitor reset`                                       | Resets the MCU.                                              |
 | `monitor singlestep` [`safe`\|`interruptible`]        | Single-stepping can either be performed in a *safe* way, where single steps are shielded against interrupts or in the default way, where a single step can lead to a jump into the interrupt dispatch table. The *safe* option is the default. |
 | `monitor timer` [`freeze`\|`run`]                     | Timers can either be *frozen* when execution is stopped, or they can *run* freely. The later option is helpful when PWM output is crucial. |

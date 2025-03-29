@@ -61,11 +61,11 @@ class TestMonitorCommand(TestCase):
         self.assertEqual(self.mo.dispatch(["debugwire"]), ("", "debugWIRE mode is enabled"))
         self.mo._dw_mode_active = False
         self.assertEqual(self.mo.dispatch(["debug", "e"]), ("dwon", "debugWIRE mode is now enabled"))
-        self.assertTrue(self.mo._dw_mode_active)
-        self.assertTrue(self.mo._dw_activated_once)
+        self.assertFalse(self.mo._dw_mode_active) # The enable command does NOT change the value of the state var!
+        self.mo._dw_mode_active = True
         self.assertEqual(self.mo.dispatch(["debug", "dis"]), ("dwoff", "debugWIRE mode is now disabled"))
         self.assertFalse(self.mo._dw_mode_active)
-        self.assertTrue(self.mo._dw_activated_once)
+        self.mo._dw_activated_once = True
         self.assertEqual(self.mo.dispatch(["debug", "enable"]),
                              ("", "Cannot reactivate debugWIRE\nYou have to exit and restart the debugger"))
         self.assertFalse(self.mo._dw_mode_active)
@@ -79,6 +79,8 @@ class TestMonitorCommand(TestCase):
         self.assertEqual(self.mo.dispatch(['veri', 'e']), ("", "Always verifying that load operations are successful"))
         self.assertTrue(self.mo._verify)
         self.assertEqual(self.mo.dispatch(['veri', 'ex']), ("", "Unknown 'monitor' command"))
+        self.assertEqual(self.mo.dispatch(['ver']), ("", "Ambiguous 'monitor' command"))
+
 
     def test_dispatch_help(self):
         self.assertTrue(len(self.mo.dispatch(['help'])[1]) > 1000)

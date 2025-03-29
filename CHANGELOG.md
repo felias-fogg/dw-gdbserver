@@ -1,5 +1,11 @@
 # Changelog
 
+### V2.0.0-pre6 (29-Mar-2025)
+
+- Fixed: Exceptions in the serial thread in dwlink.py are now caught and gracefully handled. Instead of showing a backtrace and keeping the connection open, the server is immediately terminated.
+- Added: Interpreting the argument "-c gdb_port <port>" provided by the Arduino IDE 2 when pretending to call OpenOCD. The good thing is that this is always an unused port!
+- Added: Check the voltage before ISP programming and raise Fatal Error if the target is not powered. Gives a more reasonable output than ISP command failed.
+
 ### V2.0.0-pre5 (25-Mar-2025)
 
 - Added: `monitor info` command

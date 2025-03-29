@@ -366,6 +366,8 @@ class GdbHandler():
             response = self.mon.dispatch(tokens)
             if response[0] == 'dwon':
                 self.dw.cold_start(graceful=False, callback=self.send_power_cycle)
+                # will only be called if there was no error in enabling debugWIRE mode:
+                self.mon.set_dw_mode_active()
             elif response[0] == 'dwoff':
                 self.dw.disable()
             elif response[0] == 'reset':
@@ -1753,8 +1755,7 @@ class MonitorCommand():
                 if self._dw_activated_once:
                     return("", "Cannot reactivate debugWIRE\n" +
                                "You have to exit and restart the debugger")
-                self._dw_mode_active = True
-                self._dw_activated_once = True
+                # we set the state variable to active in the calling module
                 return("dwon", "debugWIRE mode is now enabled")
             return("", "debugWIRE mode was already enabled")
         if "disable".startswith(tokens[0]):
@@ -2066,6 +2067,8 @@ class DebugWIRE():
         Since the implementation of ISP programming is somewhat funny, a few stop/start
         sequences and double reads are necessary.
         """
+        if read_target_voltage(self.dbg.housekeeper) < 1.0:
+            raise FatalError("Target is not powered")
         self.logger.info("Try to connect using ISP")
         self.spidevice = NvmAccessProviderCmsisDapSpi(self.dbg.transport, self.dbg.device_info)
         device_id = int.from_bytes(self.spidevice.read_device_id(),byteorder='little')
@@ -2152,8 +2155,10 @@ class AvrGdbRspServer():
 
     def __del__(self):
         try:
-            self.handler.bp.cleanup_breakpoints()
-            self.avrdebugger.stop_debugging()
+            if self.handler:
+                self.handler.bp.cleanup_breakpoints()
+            if self.avrdebugger and self.avrdebugger.device:
+                self.avrdebugger.stop_debugging()
         except Exception as e: #pylint: disable=broad-exception-caught
             self.logger.info("Graceful exception during stopping: %s",e)
         finally:
@@ -2208,6 +2213,12 @@ def main():
     GDBserver for debugWIRE MCUs
             '''))
 
+    parser.add_argument("-c", "--command",
+                            action='append',
+                            dest='cmd',
+                            type=str,
+                            help="command to set gdb port")
+
     parser.add_argument("-d", "--device",
                             dest='dev',
                             type=str,
@@ -2222,7 +2233,6 @@ def main():
     parser.add_argument('-s', '--start',  dest='prg',
                             help='start specified program or "noop"')
 
-    # Tool to use
     parser.add_argument("-t", "--tool",
                             type=str, choices=['atmelice', 'edbg', 'jtagice3', 'medbg', 'nedbg',
                                                    'pickit4', 'powerdebugger', 'snap', 'dwlink'],
@@ -2243,7 +2253,12 @@ def main():
                             action="store_true")
 
     # Parse args
-    args = parser.parse_args()
+    args, unknown = parser.parse_known_args()
+
+    if args.cmd:
+        portcmd = [c for c in args.cmd if 'gdb_port' in c]
+        if portcmd:
+            args.port = int(portcmd[0][9:])
 
     # Setup logging
     if args.verbose.upper() in ["INFO", "WARNING", "ERROR"]:
@@ -2264,6 +2279,9 @@ def main():
         getLogger('pymcuprog.nvm').setLevel(logging.CRITICAL)
         # we do not want to see the "read flash" messages
         getLogger('pymcuprog.avr8target').setLevel(logging.ERROR)
+
+    if unknown:
+        logger.warning("Unknown options: %s", ' '.join(unknown))
 
     if args.version:
         print("dw-gdbserver version {}".format(importlib.metadata.version("dwgdbserver")))
@@ -2312,11 +2330,10 @@ def main():
 
     except (EndOfSession, SystemExit, KeyboardInterrupt):
         logger.info("End of session")
-        print("--- exit ---\r\n")
         return 0
 
     except (ValueError, Exception) as e:
-        if logger.get_effective_level() != logging.DEBUG:
+        if logger.getEffectiveLevel() != logging.DEBUG:
             logger.critical("Fatal Error: %s",e)
             return 1
         raise

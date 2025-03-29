@@ -90,15 +90,21 @@ class TestDebugWire(TestCase):
         self.dw.spidevice.isp.enter_progmode.assert_called_once()
         self.dw.spidevice.isp.leave_progmode.assert_called_once()
 
+    @patch('dwgdbserver.dwgdbserver.pymcuprog.utils.read_voltage_parameter',
+               Mock(return_value=5.0))
     @patch('dwgdbserver.dwgdbserver.NvmAccessProviderCmsisDapSpi', MagicMock())
     def test_enable_wrong_mcu(self):
         dev_name[0] = "Wrong MCU"
+        self.dw.dbg.housekeeper = MagicMock()
         self.dw.dbg.device_info.__getitem__.return_value = 0x1E9514
         with self.assertRaises(FatalError):
             self.dw.enable()
 
+    @patch('dwgdbserver.dwgdbserver.pymcuprog.utils.read_voltage_parameter',
+               Mock(return_value=5.0))
     @patch('dwgdbserver.dwgdbserver.NvmAccessProviderCmsisDapSpi', MagicMock())
     def test_enable_ok(self):
+        self.dw.dbg.housekeeper = MagicMock()
         self.dw.spidevice = Mock()
         self.dw.spidevice.isp = Mock()
         self.dw.dbg.device_info.__getitem__.return_value = 0
@@ -108,3 +114,13 @@ class TestDebugWire(TestCase):
         self.dw.spidevice.write.assert_called()
         self.dw.spidevice.isp.leave_progmode.assert_called()
         self.dw.spidevice.isp.enter_progmode.assert_called()
+
+    @patch('dwgdbserver.dwgdbserver.pymcuprog.utils.read_voltage_parameter',
+               Mock(return_value=0.0))
+    def test_enable_no_target_power(self):
+        self.dw.dbg.housekeeper = MagicMock()
+        self.dw.spidevice = Mock()
+        self.dw.spidevice.isp = Mock()
+        self.dw.dbg.device_info.__getitem__.return_value = 0
+        with self.assertRaises(FatalError):
+            self.dw.enable()
