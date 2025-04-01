@@ -14,11 +14,13 @@ With PICkit4 it is similar. When you repeat this command, and you get the messag
 
 ### Installation
 
-Install the script with [pipx](https://pipx.pypa.io/stable/installation/) like this. After that, you can call the script as it were an executable in your account (see below).
+Install the script with [pipx](https://pipx.pypa.io/stable/installation/) like this. After that, you can call the script as if it were an executable installed in your account (see below).
 
 ```
 > pipx install dwgdbserver
 ```
+
+After that, you can invoke the gdbserver by simply typing `dw-gdbserver` (or `dw-gdbserver.exe`) into a shell.
 
 Alternatively, you can download/clone the GitHub repository. You need then to install the package poetry:
 
@@ -43,7 +45,7 @@ After that, you find an executable `dw-gdbserver` (or `dw-gdbserver.exe`) in the
 
 ### Usage
 
-If your target board is an Arduino board, you probably have to modify it by disconnecting the capacitor responsible for the auto-reset feature.
+If your target board is an Arduino board, you [must modify it by disconnecting the capacitor responsible for the auto-reset feature](https://debugwire.de/board-modifications/).
 
 Once you have connected an appropriate hardware debugger to your target board, you can start the  gdbserver in a terminal window:
 
@@ -133,10 +135,10 @@ Except for [dw-link](https://github.com/felias-fogg/dw-link), this list is copie
 * **MPLAB PICkit 4 In-Circuit Debugger** (when in 'AVR mode')
 * **MPLAB Snap In-Circuit Debugger** (when in 'AVR mode')
 * **Atmel-ICE**
-* Atmel Power Debugger
+* **Atmel Power Debugger**
 * **mEDBG - on-board debugger on Xplained Mini/Nano**
 * JTAGICE3 (firmware version 3.0 or newer)
-* **[dw-link](https://github.com/felias-fogg/dw-link)** - **DIY debugWIRE debugger running on Arduino UNO R3**
+* **[dw-link](https://github.com/felias-fogg/dw-link)** - **DIY debugWIRE debugger running on an Arduino UNO R3**
 
 
 ### List of supported and tested MCUs
@@ -167,7 +169,7 @@ This is the list of all debugWIRE MCUs, which should all be compatible with dw-g
 * __ATmega168__, __ATmega168A__, __ATmega168PA__, ATmega168PB,
 * **ATmega328**, __ATmega328P__, **ATmega328PB**
 
-The ATmega48 and ATmega88 (without the A-suffix) sitting on my desk suffer from stuck-at-one bits in the program counter and are, therefore, not debuggable by GDB. I suspect that this applies to all chips labelled this way. In any case, the test for stuck-at-one-bits is made when connecting to the chips.
+The ATmega48 and ATmega88 (without the A-suffix) sitting on my desk suffer from stuck-at-one bits in the program counter and are, therefore, not debuggable by GDB. I suspect that this applies to all chips labeled this way. In any case, the test for stuck-at-one-bits is made when connecting to the chips.
 
 #### Other ATmegas:
 
@@ -228,4 +230,4 @@ sudo chmod a+rw /dev/ttyACM0
 
 The script has all the basic functionality but still needs some polishing.
 
-I also plan to provide binaries, which can be used as tools for the Arduino IDE 2. And if it all works, it is only a tiny step to generalize it to the JTAG and UPDI AVR MCUs. So, stay tuned.
+I also plan to provide binaries, which can be used as tools for the Arduino IDE 2. And if it all works, it is only a "tiny" step to generalize it to the JTAG and UPDI AVR MCUs. So, stay tuned.
