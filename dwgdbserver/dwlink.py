@@ -13,6 +13,7 @@ import time
 import socket
 import serial
 import serial.threaded
+from serial import SerialException
 import serial.tools.list_ports
 
 
@@ -105,6 +106,8 @@ def discover(args):
                             checksum = sum(message)&0xFF
                             ser.write(b'$' + message + b'#' + (b'%02X' % checksum))
                             return (sp, s.device)
+            except SerialException:
+                pass
             except Exception as e: # pylint: disable=broad-exception-caught
                 sys.stderr.write('[ERROR] ' + repr(e) + '\n\r')
     return (None, None)

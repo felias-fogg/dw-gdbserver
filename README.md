@@ -14,7 +14,11 @@ With PICkit4 it is similar. When you repeat this command, and you get the messag
 
 ### Installation
 
-Install the script with [pipx](https://pipx.pypa.io/stable/installation/) like this. After that, you can call the script as if it were an executable installed in your account (see below).
+If things do not go as smoothly after the installation as promised here, consult the hints [at the end of this document](#eod). For Linux, some permissions need to be granted. Under macOS, you may need to install an additional library.
+
+##### Pypi installation
+
+Install the script with [pipx](https://pipx.pypa.io/stable/installation/) like this. After that, you can execute the script as if it were an executable installed in your account (see below).
 
 ```
 > pipx install dwgdbserver
@@ -22,13 +26,15 @@ Install the script with [pipx](https://pipx.pypa.io/stable/installation/) like t
 
 After that, you can invoke the gdbserver by simply typing `dw-gdbserver` (or `dw-gdbserver.exe`) into a shell.
 
+##### GitHub installation
+
 Alternatively, you can download/clone the GitHub repository. You need then to install the package poetry:
 
 ```
 > pipx install poetry
 ```
 
-With that you can start executing the script inside the downloaded folder as follows:
+With that, you can start executing the script inside the downloaded folder as follows:
 
 ```
 > poetry install
@@ -181,15 +187,25 @@ The ATmega48 and ATmega88 (without the A-suffix) sitting on my desk suffer from 
 * AT90PWM216, AT90PWM316
 * ATmega8HVA, ATmega16HVA, ATmega16HVB, ATmega32HVA, ATmega32HVB, ATmega64HVE2
 
+<a name=eod></a>
+
+### Notes for macOS
+
+If, after the installation, you get the error **usb.core.NoBackendError: No backend available** under macOS, you need to install libusb:
+
+```
+> brew install libusb
+```
+
+If the error persists, here are a few other potential cures: https://github.com/greatscottgadgets/cynthion/issues/136
+
 ### Notes for Linux systems
 
 The following text is copied verbatim from the README of pyedbglib.
 
 HIDAPI needs to build using packages: libusb-1.0.0-dev, libudev-dev
 
-USB devices need udev rules to be added to a file in /etc/udev/rules.d
-
-Example of udev rules for supported debuggers:
+USB devices need udev rules to be added to a file in /etc/udev/rules.d Example of udev rules for supported debuggers:
 
 ```bash
 # HIDAPI/libusb:

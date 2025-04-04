@@ -1,5 +1,12 @@
 # Changelog
 
+### V2.0.1 (4-Apr-2025)
+
+- Changed: SerialExceptions will not be displayed in the discovery process of dw-link. Under Linux. there are far too many of those!
+
+- Added: A note in README about libusb under macOS
+- Added: General note about problems under the header **Installation**
+
 ### V2.0.0 (1-Apr-2025)
 
 - Everything seems to be in place. Integration tests have yet to be written, but the application seems quite stable when tested.
