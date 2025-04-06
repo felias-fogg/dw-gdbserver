@@ -24,7 +24,8 @@ class XAvrDebugger(AvrDebugger):
     :type use_events_for_run_stop_state: boolean
     """
     def __init__(self, transport, device, use_events_for_run_stop_state=True):
-        super().__init__(transport)
+        if transport.hid_device is not None:
+            super().__init__(transport)
         # Gather device info
         # moved here so that we have mem + device info even before dw has been started
         try:
@@ -39,7 +40,8 @@ class XAvrDebugger(AvrDebugger):
         self.memory_info = deviceinfo.DeviceMemoryInfo(self.device_info)
         # ISP interface in order to program DWEN fuse
         self.spidevice = None
-        self.edbg_protocol = EdbgProtocol(transport) # necessary to access target power control
+        if transport.hid_device is not None:
+            self.edbg_protocol = EdbgProtocol(transport) # necessary to access target power control
 
 
 

@@ -120,8 +120,8 @@ def main(args):
     # discover adapter
     speed, device = discover(args)
     if speed is None or device is None:
-        sys.stderr.write('[WARNING] *** No hardware debugger discovered **\n')
-        sys.exit(1)
+        sys.stderr.write('[CRITICAL] No hardware debugger discovered\n')
+        return # return to dw-gdbserver main, which will handle this problem
 
     # connect to serial port
     ser = serial.serial_for_url(device, do_not_open=True)

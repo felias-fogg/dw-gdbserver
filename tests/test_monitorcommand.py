@@ -13,7 +13,7 @@ logging.basicConfig(level=logging.CRITICAL)
 class TestMonitorCommand(TestCase):
 
     def setUp(self):
-        self.mo = MonitorCommand()
+        self.mo = MonitorCommand(False, False)
 
     def test_dispatch_ambigious(self):
         self.assertEqual(self.mo.dispatch(["ver"]), ("", "Ambiguous 'monitor' command"))

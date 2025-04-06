@@ -14,19 +14,40 @@ With PICkit4 it is similar. When you repeat this command, and you get the messag
 
 ### Installation
 
-If things do not go as smoothly after the installation as promised here, consult the hints [at the end of this document](#eod). For Linux, some permissions need to be granted. Under macOS, you may need to install an additional library.
+#### Pypi installation
 
-##### Pypi installation
+It will be necessary to install Python and then [pipx](https://pipx.pypa.io/) first. If you have not done so, follow the instructions on the [pipx website](https://pipx.pypa.io/stable/installation/). Then proceed as follows
 
-Install the script with [pipx](https://pipx.pypa.io/stable/installation/) like this. After that, you can execute the script as if it were an executable installed in your account (see below).
+##### Linux
 
 ```
 > pipx install dwgdbserver
+> pipx ensurepath
+> sudo dw-gdbserver --install-udev-rules
 ```
 
-After that, you can invoke the gdbserver by simply typing `dw-gdbserver` (or `dw-gdbserver.exe`) into a shell.
+After restarting your shell, you can invoke the gdbserver by simply typing `dw-gdbserver` into a shell. The binary is stored under `~/.local/bin/`
 
-##### GitHub installation
+##### macOS
+
+```
+> pipx install dwgdbserver
+> pipx ensurepath
+> brew install libusb
+```
+
+The last command might not be necessary. However, if libusb has not been installed yet, it is high time to do so. After restarting the shell, you should be able to start the gdbserver.
+
+##### Windows
+
+```
+> pipx install dwgdbserver
+> pipx ensurepath
+```
+
+Again, you need to restart the shell, and then you can type in `dw-gdbserver.exe` when you want to start the gdbserver.
+
+#### GitHub installation
 
 Alternatively, you can download/clone the GitHub repository. You need then to install the package poetry:
 
@@ -94,18 +115,17 @@ Note: automatically using hardware breakpoints for read-only addresses.
 
 ### Command line options
 
-| Optionname           | Description                                                   |
-| -------------------- | ------------------------------------------------------------ |
-| `--device` <br>`-d`  | The argument to this option specifies the MCU type of the target chip in lower case.  This option is mandatory. If a '?' mark is given, all supported MCUs are listed. |
-| `--gede`<br>`-g`     | No argument for this option. This option will start the `Gede` debugger GUI. |
-| `--port` <br>`-p`    | IP port on the local host to which GDB can connect.          |
-| `--start` <br>`-s`   | Program to start or the string `noop`, when no program should be started |
-| `--tool`<br>`-t`     | Specifying the debug tool. Possible values are `atmelice`, `edbg`, `jtagice3`, `medbg`, `nedbg`, `pickit4`, `powerdebugger`, `snap`, `dwlink`. Use of this option is necessary only if more than one debugging tool is connected to the computer. |
-| `--usbsn` <br>`-u`   | USB serial number of the tool. This is only necessary if one has multiple debugging tools connected to the computer. |
-| `--verbose` <br>`-v` | Specify verbosity level. Possible values are `debug`, `info`, `warning`, `error`, or `critical`. The default is `info`. |
-| `--version` <br>`-V` | Print dw-gdbserver version number and exit.                  |
-
-
+| Optionname             | Description                                                  |
+| ---------------------- | ------------------------------------------------------------ |
+| `--device` <br>`-d`    | The argument to this option specifies the MCU type of the target chip in lower case.  This option is mandatory. If a '?' mark is given, all supported MCUs are listed. |
+| `--gede`<br>`-g`       | No argument for this option. This option will start the `Gede` debugger GUI. |
+| `--port` <br>`-p`      | IP port on the local host to which GDB can connect.          |
+| `--start` <br>`-s`     | Program to start or the string `noop`, when no program should be started |
+| `--tool`<br>`-t`       | Specifying the debug tool. Possible values are `atmelice`, `edbg`, `jtagice3`, `medbg`, `nedbg`, `pickit4`, `powerdebugger`, `snap`, `dwlink`. Use of this option is necessary only if more than one debugging tool is connected to the computer. |
+| `--usbsn` <br>`-u`     | USB serial number of the tool. This is only necessary if one has multiple debugging tools connected to the computer. |
+| `--verbose` <br>`-v`   | Specify verbosity level. Possible values are `debug`, `info`, `warning`, `error`, or `critical`. The default is `info`. |
+| `--version` <br>`-V`   | Print dw-gdbserver version number and exit.                  |
+| `--install-udev-rules` | Install the udev rules necessary for Microchip's EDBG debuggers. Needs to be run with `sudo` and is only present under Linux. |
 
 ### How to get into and out of debugWIRE mode
 
@@ -187,60 +207,53 @@ The ATmega48 and ATmega88 (without the A-suffix) sitting on my desk suffer from 
 * AT90PWM216, AT90PWM316
 * ATmega8HVA, ATmega16HVA, ATmega16HVB, ATmega32HVA, ATmega32HVB, ATmega64HVE2
 
-<a name=eod></a>
 
-### Notes for macOS
-
-If, after the installation, you get the error **usb.core.NoBackendError: No backend available** under macOS, you need to install libusb:
-
-```
-> brew install libusb
-```
-
-If the error persists, here are a few other potential cures: https://github.com/greatscottgadgets/cynthion/issues/136
 
 ### Notes for Linux systems
 
-The following text is copied verbatim from the README of pyedbglib.
+The following text is copied verbatim from the README of pyedbglib. The udev rules will be added when you call dw-gdbserver with the option --install-udev-rules in sudo-mode. Permission for serial lines, as described in the end, needs to be set manually. However, the hardware debuggers only use USB.
 
-HIDAPI needs to build using packages: libusb-1.0.0-dev, libudev-dev
+> HIDAPI needs to build using packages: libusb-1.0.0-dev, libudev-dev
+>
+> USB devices need udev rules to be added to a file in /etc/udev/rules.d Example of udev rules for supported debuggers:
+>
+> ```bash
+> # HIDAPI/libusb:
+>
+> # JTAGICE3
+> SUBSYSTEM=="usb", ATTRS{idVendor}=="03eb", ATTRS{idProduct}=="2140", MODE="0666"
+> # Atmel-ICE
+> SUBSYSTEM=="usb", ATTRS{idVendor}=="03eb", ATTRS{idProduct}=="2141", MODE="0666"
+> # Power Debugger
+> SUBSYSTEM=="usb", ATTRS{idVendor}=="03eb", ATTRS{idProduct}=="2144", MODE="0666"
+> # EDBG - debugger on Xplained Pro
+> SUBSYSTEM=="usb", ATTRS{idVendor}=="03eb", ATTRS{idProduct}=="2111", MODE="0666"
+> # EDBG - debugger on Xplained Pro (MSD mode)
+> SUBSYSTEM=="usb", ATTRS{idVendor}=="03eb", ATTRS{idProduct}=="2169", MODE="0666"
+> # mEDBG - debugger on Xplained Mini
+> SUBSYSTEM=="usb", ATTRS{idVendor}=="03eb", ATTRS{idProduct}=="2145", MODE="0666"
+> # PKOB nano (nEDBG) - debugger on Curiosity Nano
+> SUBSYSTEM=="usb", ATTRS{idVendor}=="03eb", ATTRS{idProduct}=="2175", MODE="0666"
+> # PKOB nano (nEDBG) in DFU mode - bootloader of debugger on Curiosity Nano
+> SUBSYSTEM=="usb", ATTRS{idVendor}=="03eb", ATTRS{idProduct}=="2fc0", MODE="0666"
+> # MPLAB PICkit 4 In-Circuit Debugger
+> SUBSYSTEM=="usb", ATTRS{idVendor}=="03eb", ATTRS{idProduct}=="2177", MODE="0666"
+> # MPLAB Snap In-Circuit Debugger
+> SUBSYSTEM=="usb", ATTRS{idVendor}=="03eb", ATTRS{idProduct}=="2180", MODE="0666"
+> ```
+>
+> pyedbglib also provides helper functions for accessing serial ports.  The user has to be part of the 'dialout' group to allow this.  This can be done by executing:
+> ```bash
+> sudo adduser $USER dialout
+> ```
+>
+> It may also be necessary to grant read+write permission to the port, for example:
+> ```bash
+> sudo chmod a+rw /dev/ttyACM0
+> ```
+>
 
-USB devices need udev rules to be added to a file in /etc/udev/rules.d Example of udev rules for supported debuggers:
 
-```bash
-# HIDAPI/libusb:
-
-# JTAGICE3
-SUBSYSTEM=="usb", ATTRS{idVendor}=="03eb", ATTRS{idProduct}=="2140", MODE="0666"
-# Atmel-ICE
-SUBSYSTEM=="usb", ATTRS{idVendor}=="03eb", ATTRS{idProduct}=="2141", MODE="0666"
-# Power Debugger
-SUBSYSTEM=="usb", ATTRS{idVendor}=="03eb", ATTRS{idProduct}=="2144", MODE="0666"
-# EDBG - debugger on Xplained Pro
-SUBSYSTEM=="usb", ATTRS{idVendor}=="03eb", ATTRS{idProduct}=="2111", MODE="0666"
-# EDBG - debugger on Xplained Pro (MSD mode)
-SUBSYSTEM=="usb", ATTRS{idVendor}=="03eb", ATTRS{idProduct}=="2169", MODE="0666"
-# mEDBG - debugger on Xplained Mini
-SUBSYSTEM=="usb", ATTRS{idVendor}=="03eb", ATTRS{idProduct}=="2145", MODE="0666"
-# PKOB nano (nEDBG) - debugger on Curiosity Nano
-SUBSYSTEM=="usb", ATTRS{idVendor}=="03eb", ATTRS{idProduct}=="2175", MODE="0666"
-# PKOB nano (nEDBG) in DFU mode - bootloader of debugger on Curiosity Nano
-SUBSYSTEM=="usb", ATTRS{idVendor}=="03eb", ATTRS{idProduct}=="2fc0", MODE="0666"
-# MPLAB PICkit 4 In-Circuit Debugger
-SUBSYSTEM=="usb", ATTRS{idVendor}=="03eb", ATTRS{idProduct}=="2177", MODE="0666"
-# MPLAB Snap In-Circuit Debugger
-SUBSYSTEM=="usb", ATTRS{idVendor}=="03eb", ATTRS{idProduct}=="2180", MODE="0666"
-```
-
-pyedbglib also provides helper functions for accessing serial ports.  The user has to be part of the 'dialout' group to allow this.  This can be done by executing:
-```bash
-sudo adduser $USER dialout
-```
-
-It may also be necessary to grant read+write permission to the port, for example:
-```bash
-sudo chmod a+rw /dev/ttyACM0
-```
 
 ### What the future has in store for us
 

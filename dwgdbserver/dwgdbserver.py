@@ -4,6 +4,7 @@ debugWIRE GDBServer
 # pylint: disable=too-many-lines, consider-using-f-string
 
 # args, logging
+import platform
 import importlib.metadata
 import sys
 import argparse
@@ -11,16 +12,18 @@ import logging
 from logging import getLogger
 import textwrap
 
-# communication
-import socket
-import select
-
 # utilities
 import binascii
 import time
 
+# communication
+import socket
+import select
+import usb
+
 # debugger modules
 import pymcuprog
+from pyedbglib.protocols.avrispprotocol import AvrIspProtocolError
 from pyedbglib.protocols.avr8protocol import Avr8Protocol
 from pyedbglib.protocols.edbgprotocol import EdbgProtocol
 from pyedbglib.hidtransport.hidtransportfactory import hid_transport
@@ -55,17 +58,19 @@ class FatalError(Exception):
         super().__init__(msg)
 
 class GdbHandler():
-    #pylint: disable=too-many-instance-attributes
+    # pylint: disable=too-many-instance-attributes
     """
     GDB handler
     Maps between incoming GDB requests and AVR debugging protocols (via pymcuprog)
     """
-    def __init__ (self, comsocket, avrdebugger, devicename):
+    # pylint: disable=too-many-arguments, too-many-positional-arguments
+    def __init__ (self, comsocket, avrdebugger, devicename,
+                      no_backend_error, no_hw_dbg_error):
         self.packet_size = 8000
         self.logger = getLogger('GdbHandler')
         self.dbg = avrdebugger
         self.dw = DebugWIRE(avrdebugger, devicename)
-        self.mon = MonitorCommand()
+        self.mon = MonitorCommand(no_backend_error, no_hw_dbg_error) # hw debugger connected
         self.mem = Memory(avrdebugger, self.mon)
         self.bp = BreakAndExec(1, self.mon, avrdebugger, self.mem.flash_read_word)
         self._comsocket = comsocket
@@ -385,9 +390,12 @@ class GdbHandler():
                 self.logger.info("Commands: %s", resp)
             elif 'info' in response[0]:
                 response = ("", response[1].format(dev_name[self.dbg.device_info['device_id']]))
+        except AvrIspProtocolError as e:
+            self.logger.critical("ISP programming failed: %s", e)
+            self.send_reply_packet("ISP programming failed: %s" % e)
         except (FatalError, PymcuprogNotSupportedError, PymcuprogError) as e:
             self.logger.critical(e)
-            self.send_reply_packet("Fatal error: %s\n" % e)
+            self.send_reply_packet("Fatal error: %s" % e)
         else:
             self.send_reply_packet(response[1])
 
@@ -1555,7 +1563,9 @@ class MonitorCommand():
     the right action. The return value of the dispatch method is
     a pair consisting of an action identifier and the string to be displayed.
     """
-    def __init__(self):
+    def __init__(self, no_backend_error, no_hw_dbg_error):
+        self._no_backend_error = no_backend_error
+        self._no_hw_dbg_error = no_hw_dbg_error
         self._dw_mode_active = False
         self._dw_activated_once = False
         self._noload = False # when true, one may start execution even without a previous load
@@ -1746,6 +1756,20 @@ class MonitorCommand():
 
     # pylint: disable=too-many-return-statements
     def _mon_debugwire(self, tokens):
+        if self._no_backend_error:
+            if platform.system() == 'Linux':
+                return("", "Could not connect via USB.\nPlease install libusb: " +
+                           "'sudo apt install libusb-1.0.-0'")
+            if platform.system() == "Darwin":
+                return("", "Could not connect via USB.\nPlease install libusb: " +
+                           "'brew install libusb'")
+            return("", "Could not connect via USB. Should not have happened!")
+        if self._no_hw_dbg_error:
+            return("", "No hardware debugger discovered.\n" +
+                       "Debugging cannot be activated." +
+                       (("\nPerhaps you need to install the udev rules first:\n" +
+                             "'sudo %s --install-udev-rules'" % __file__)\
+                        if platform.system() == 'Linux' else ""))
         if tokens[0] =="":
             if self._dw_mode_active:
                 return("", "debugWIRE mode is enabled")
@@ -2117,11 +2141,14 @@ class AvrGdbRspServer():
     and responding, and terminating. The important part is calling the handle_data
     method of the handler.
     """
-
-    def __init__(self, avrdebugger, devicename, port):
+    # pylint: disable=too-many-arguments, too-many-positional-arguments
+    def __init__(self, avrdebugger, devicename, port,
+                     no_backend_error, no_hw_dbg_error):
         self.avrdebugger = avrdebugger
         self.devicename = devicename
         self.port = port
+        self.no_backend_error = no_backend_error
+        self.no_hw_dbg_error = no_hw_dbg_error
         self.logger = getLogger("AvrGdbRspServer")
         self.connection = None
         self.gdb_socket = None
@@ -2142,7 +2169,8 @@ class AvrGdbRspServer():
         self.connection, self.address = self.gdb_socket.accept()
         self.connection.setblocking(0)
         self.logger.info('Connection from %s', self.address)
-        self.handler = GdbHandler(self.connection, self.avrdebugger, self.devicename)
+        self.handler = GdbHandler(self.connection, self.avrdebugger, self.devicename,
+                                      self.no_backend_error, self.no_hw_dbg_error)
         while True:
             ready = select.select([self.connection], [], [], 0.5)
             if ready[0]:
@@ -2202,11 +2230,36 @@ def _setup_tool_connection(args, logger):
 
     return toolconnection
 
-# pylint: disable=too-many-statements, too-many-branches, too-many-return-statements
+
+# pylint: disable=too-many-statements, too-many-branches, too-many-return-statements, too-many-locals
 def main():
     """
     Configures the CLI and parses the arguments
     """
+    no_backend_error = False # will become true when libusb is not found
+    no_hw_dbg_error = False # will become true, when no HW debugger is found
+
+    udev_rules= '''# JTAGICE3
+SUBSYSTEM=="usb", ATTRS{idVendor}=="03eb", ATTRS{idProduct}=="2140", MODE="0666"
+# Atmel-ICE
+SUBSYSTEM=="usb", ATTRS{idVendor}=="03eb", ATTRS{idProduct}=="2141", MODE="0666"
+# Power Debugger
+SUBSYSTEM=="usb", ATTRS{idVendor}=="03eb", ATTRS{idProduct}=="2144", MODE="0666"
+# EDBG - debugger on Xplained Pro
+SUBSYSTEM=="usb", ATTRS{idVendor}=="03eb", ATTRS{idProduct}=="2111", MODE="0666"
+# EDBG - debugger on Xplained Pro (MSD mode)
+SUBSYSTEM=="usb", ATTRS{idVendor}=="03eb", ATTRS{idProduct}=="2169", MODE="0666"
+# mEDBG - debugger on Xplained Mini
+SUBSYSTEM=="usb", ATTRS{idVendor}=="03eb", ATTRS{idProduct}=="2145", MODE="0666"
+# PKOB nano (nEDBG) - debugger on Curiosity Nano
+SUBSYSTEM=="usb", ATTRS{idVendor}=="03eb", ATTRS{idProduct}=="2175", MODE="0666"
+# PKOB nano (nEDBG) in DFU mode - bootloader of debugger on Curiosity Nano
+SUBSYSTEM=="usb", ATTRS{idVendor}=="03eb", ATTRS{idProduct}=="2fc0", MODE="0666"
+# MPLAB PICkit 4 In-Circuit Debugger
+SUBSYSTEM=="usb", ATTRS{idVendor}=="03eb", ATTRS{idProduct}=="2177", MODE="0666"
+# MPLAB Snap In-Circuit Debugger
+SUBSYSTEM=="usb", ATTRS{idVendor}=="03eb", ATTRS{idProduct}=="2180", MODE="0666"'''
+
     parser = argparse.ArgumentParser(usage="%(prog)s [options]",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description=textwrap.dedent('''\n\
@@ -2252,6 +2305,12 @@ def main():
                             help="Print dw-gdbserver version number and exit",
                             action="store_true")
 
+    if platform.system() == 'Linux':
+        parser.add_argument("--install-udev-rules",
+                                help="Install udev rules for Microchip hardware " +
+                                "debuggers under /etc/udev/rules.d/",
+                                action="store_true")
+
     # Parse args
     args, unknown = parser.parse_known_args()
 
@@ -2261,7 +2320,7 @@ def main():
             args.port = int(portcmd[0][9:])
 
     # Setup logging
-    if args.verbose.upper() in ["INFO", "WARNING", "ERROR"]:
+    if args.verbose.upper() in ["INFO", "WARNING", "ERROR", "CRITICAL"]:
         form = "[%(levelname)s] %(message)s"
     else:
         form = "[%(levelname)s] %(name)s: %(message)s"
@@ -2293,6 +2352,17 @@ def main():
             print(d)
         return 0
 
+    if hasattr(args, 'install_udev_rules') and args.install_udev_rules:
+        logger.info("Will try to install udev rules")
+        try:
+            with open("/etc/udev/rules.d/99-edbg-debuggers.rules", "w", encoding='utf-8') as f:
+                f.write(udev_rules)
+        except Exception as e: #pylint: disable=broad-exception-caught
+            logger.critical("Could not install the udev rules: %s", e)
+            return 1
+        logger.info("Udev rules have been successfully installed")
+        return 0
+
     device = args.dev
 
     if not device:
@@ -2312,19 +2382,37 @@ def main():
 
     try:
         backend.connect_to_tool(toolconnection)
+    except usb.core.NoBackendError as e:
+        no_backend_error = True
+        logger.critical("Could not connect to hardware debugger: %s", e)
+        if platform.system() == 'Darwin':
+            logger.critical("Install libusb: 'brew install libusb'")
+            logger.critical("Maybe consult: " +
+                            "https://github.com/greatscottgadgets/cynthion/issues/136")
+        elif platform.system() == 'Linux':
+            logger.critical("Install libusb: 'sudo apt install libusb-1.0-0'")
+        else:
+            logger.critical("This error should not happen!")
     except pymcuprog.pymcuprog_errors.PymcuprogToolConnectionError:
-        return dwlink.main(args)
-
+        dwlink.main(args)
+        no_hw_dbg_error = True
     finally:
         backend.disconnect_from_tool()
 
     transport = hid_transport()
-    transport.connect(serial_number=toolconnection.serialnumber, product=toolconnection.tool_name)
-    logger.info("Connected to %s", transport.hid_device.get_product_string())
+    if not no_backend_error:
+        transport.connect(serial_number=toolconnection.serialnumber,
+                              product=toolconnection.tool_name)
+    if not no_backend_error and not no_hw_dbg_error:
+        logger.info("Connected to %s", transport.hid_device.get_product_string())
+    else:
+        if platform.system() == 'Linux' and no_hw_dbg_error:
+            logger.critical("Perhaps you need to install the udev rules first:\n" +
+                                "'sudo %s --install-udev-rules'", __file__)
 
     logger.info("Starting dw-gdbserver")
     avrdebugger = XAvrDebugger(transport, device)
-    server = AvrGdbRspServer(avrdebugger, device, args.port)
+    server = AvrGdbRspServer(avrdebugger, device, args.port, no_backend_error, no_hw_dbg_error)
     try:
         server.serve()
 
