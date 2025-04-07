@@ -1,7 +1,5 @@
 # dw-gdbserver
 
-### What is it good for?
-
 This Python script acts as a [gdbserver](https://sourceware.org/gdb/current/onlinedocs/gdb.html/Server.html#Server) for [*debugWIRE*](https://debugwire.de) MCUs, such as the ATmega328P.  It can communicate with Microchip debuggers such as [Atmel-ICE](https://www.microchip.com/en-us/development-tool/atatmel-ice) and [MPLAB SNAP](https://www.microchip.com/en-us/development-tool/pg164100) (in AVR mode), and it provides a pass-through service for the DIY hardware debugger [dw-link](https://github.com/felias-fogg/dw-link). For Microchip debuggers, it uses the infrastructure provided by [pymcuprog](https://github.com/microchip-pic-avr-tools/pymcuprog) and [pyedgblib](https://github.com/microchip-pic-avr-tools/pyedbglib) to implement a full-blown gdbserver.
 
 By the way, switching to AVR mode in the SNAP debugger is easily accomplished by using avrdude (>= Version 7.3):
@@ -16,14 +14,16 @@ With PICkit4 it is similar. When you repeat this command, and you get the messag
 
 #### Pypi installation
 
-It will be necessary to install Python and then [pipx](https://pipx.pypa.io/) first. If you have not done so, follow the instructions on the [pipx website](https://pipx.pypa.io/stable/installation/). Then proceed as follows
+I assume that you already have a recent Python version installed (>=3.9).
+
+It will be necessary to install [pipx](https://pipx.pypa.io/) first. If you have not done so, follow the instructions on the [pipx website](https://pipx.pypa.io/stable/installation/). Then proceed as follows.
 
 ##### Linux
 
 ```
 > pipx install dwgdbserver
 > pipx ensurepath
-> sudo dw-gdbserver --install-udev-rules
+> sudo ~/.local/bin/dw-gdbserver --install-udev-rules
 ```
 
 After restarting your shell, you can invoke the gdbserver by simply typing `dw-gdbserver` into a shell. The binary is stored under `~/.local/bin/`
@@ -36,7 +36,7 @@ After restarting your shell, you can invoke the gdbserver by simply typing `dw-g
 > brew install libusb
 ```
 
-The last command might not be necessary. However, if libusb has not been installed yet, it is high time to do so. After restarting the shell, you should be able to start the gdbserver.
+After restarting the shell, you should be able to start the gdbserver.
 
 ##### Windows
 
@@ -74,7 +74,7 @@ After that, you find an executable `dw-gdbserver` (or `dw-gdbserver.exe`) in the
 
 If your target board is an Arduino board, you [must modify it by disconnecting the capacitor responsible for the auto-reset feature](https://debugwire.de/board-modifications/).
 
-Once you have connected an appropriate hardware debugger to your target board, you can start the  gdbserver in a terminal window:
+Once [you have connected an appropriate hardware debugger to your target board](doc/connecting-debuggers.md), you can start the  gdbserver in a terminal window.
 
 ```
 > dw-gdbserver -d atmega328p
@@ -139,7 +139,7 @@ In addition to the above mentioned command for enabling debugWIRE mode, there ar
 | ----------------------------------------------------- | ------------------------------------------------------------ |
 | `monitor breakpoints` [`all`\|`software`\|`hardware`] | Restricts the kind of breakpoints the hardware debugger can use. Either *all* types are permitted, only *software* breakpoints are allowed, or only *hardware* breakpoints can be used. Using all kinds is the default. |
 | `monitor caching` [`enable`\|`disable`]               | The loaded executable is used as a cache in the gdbserver when *enabled*, which is the default. |
-| `monitor debugwire` [`enable`\|`disable`]             | DebugWIRE mode will be enabled or disabled. When enabling it, you may be asked to power-cycle the target. After disabling debugWIRE mode, the MCU can be programmed again using ISP programming. |
+| `monitor debugwire` [`enable`\|`disable`]             | DebugWIRE mode will be enabled or disabled. When enabling it, you may be asked to power-cycle the target. After disabling debugWIRE mode, the MCU can be programmed again using SPI programming. |
 | `monitor help`                                        | Display help text.                                           |
 | `monitor info`                                        | Display information about the target and the state of the debugger. |
 | `monitor load` [`readbeforewrite`\|`writeonly`]       | When loading an executable, either each flash page is compared with the content to be loaded, and flashing is skipped if the content is already there, or each flash page is written without reading the current contents beforehand. The first option is the default option and there is no reason to change it. |

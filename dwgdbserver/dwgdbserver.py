@@ -44,7 +44,7 @@ SIGINT  = 2     # Interrupt  - user interrupted the program (UART ISR)
 SIGILL  = 4     # Illegal instruction
 SIGTRAP = 5     # Trace trap  - stopped on a breakpoint
 SIGABRT = 6     # Abort because of a fatal error or no breakpoint available
-SIGBUS = 10    # Segmentation violation means in our case stack overflow
+SIGBUS = 10     # Segmentation violation means in our case stack overflow
 
 
 class EndOfSession(Exception):
@@ -79,6 +79,7 @@ class GdbHandler():
         self._lastmessage = ""
         self._extended_remote_mode = False
         self._vflashdone = False # set to True after vFlashDone received
+        self._connection_error = None
 
 
         self.packettypes = {
@@ -370,6 +371,8 @@ class GdbHandler():
         try:
             response = self.mon.dispatch(tokens)
             if response[0] == 'dwon':
+                if self._connection_error:
+                    raise FatalError(self._connection_error)
                 self.dw.cold_start(graceful=False, callback=self.send_power_cycle)
                 # will only be called if there was no error in enabling debugWIRE mode:
                 self.mon.set_dw_mode_active()
@@ -437,8 +440,15 @@ class GdbHandler():
         # Try to start a debugWIRE debugging session
         # if we are already in debugWIRE mode, this will work
         # if not, one has to use the 'monitor debugwire on' command later on
-        if  self.dw.warm_start(graceful=True):
-            self.mon.set_dw_mode_active()
+        # If a fatal error is raised, we will remember that and print it again
+        # when a request for enabling debugWIRE is made
+        try:
+            if  self.dw.warm_start(graceful=True):
+                self.mon.set_dw_mode_active()
+        except FatalError as e:
+            self.logger.critical("Error while connecting: %s", e)
+            self._connection_error = e
+            self.dbg.stop_debugging()
         self.logger.debug("dw_mode_active=%d",self.mon.is_dw_mode_active())
         self.send_packet("PacketSize={0:X};qXfer:memory-map:read+".format(self.packet_size))
 
@@ -2190,8 +2200,8 @@ class AvrGdbRspServer():
         except Exception as e: #pylint: disable=broad-exception-caught
             self.logger.info("Graceful exception during stopping: %s",e)
         finally:
-            # sleep 1 second before closing in order to allow the client to close first
-            time.sleep(1)
+            # sleep 0.5 seconds before closing in order to allow the client to close first
+            time.sleep(0.5)
             self.logger.info("Closing socket")
             if self.gdb_socket:
                 self.gdb_socket.close()

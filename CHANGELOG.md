@@ -1,8 +1,15 @@
 # Changelog
 
+### v2.1.1 (7-Apr-2025)
+
+- Fixed: Fatal errors (wrong MCU, stuck-at-1-bits) during the warm start when connecting with target remote will now be stored and shown again when trying to enable debugWIRE.
+- Fixed: When such a fatal error happens, debugging is immediately stopped. Otherwise, it could happen that the debugger is in a funny state when starting the next session.
+- Changed: Wait period before the exit is reduced to 0.5 seconds
+- Added: Document describing how to connect the different debuggers to targets, which is linked to from README.
+
 ### v2.1.0 (6-Apr-2025)
 
-- Added: new option `--install-udev-rules` when running under Linux. When used, dw-gdbserver must be called with `sudo`.
+- Added: new option `--install-udev-rules` when running under Linux. When used, dw-gdbserver must be called with `sudo`. This will install the udev rules under `/etc/udev/rules.d/`.
 - Added: `NoBackendError` is now caught when trying to connect. It means that 'libusb' needs to be installed or made visible to PyUsb. The error message now says as much.
 - Added: It is noticed when no hardware debugger is found, and under Linux, it is noted that udev rules must be added.
 - Changed: Both errors are marked as `CRITICAL`, but the server is not terminated. When trying to start with `monitor debugwire enable`, an appropriate error message is displayed. This will help when the gdbserver is started in GUI that does not display the log output of the gdbserver.
@@ -23,7 +30,7 @@
 
 - Fixed: Exceptions in the serial thread in dwlink.py are now caught and gracefully handled. Instead of showing a backtrace and keeping the connection open, the server is immediately terminated.
 - Added: Interpreting the argument "-c gdb_port <port>" provided by the Arduino IDE 2 when pretending to call OpenOCD. The good thing is that this is always an unused port!
-- Added: Check the voltage before ISP programming and raise a Fatal Error if the target is not powered. This gives a more reasonable output than "ISP command failed."
+- Added: Check the voltage before SPI programming and raise a Fatal Error if the target is not powered. This gives a more reasonable output than "ISP command failed."
 
 ### v2.0.0-pre5 (25-Mar-2025)
 
