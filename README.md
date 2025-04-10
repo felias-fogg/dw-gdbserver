@@ -74,7 +74,7 @@ After that, you find an executable `dw-gdbserver` (or `dw-gdbserver.exe`) in the
 
 If your target board is an Arduino board, you [must modify it by disconnecting the capacitor responsible for the auto-reset feature](https://debugwire.de/board-modifications/).
 
-Once [you have connected an appropriate hardware debugger to your target board](doc/connecting-debuggers.md), you can start the  gdbserver in a terminal window.
+Once [you have connected an appropriate hardware debugger to your target board](https://github.com/felias-fogg/dw-gdbserver/blob/main/doc/connecting-debuggers.md), you can start the  gdbserver in a terminal window.
 
 ```
 > dw-gdbserver -d atmega328p
@@ -257,6 +257,6 @@ The following text is copied verbatim from the README of pyedbglib. The udev rul
 
 ### What the future has in store for us
 
-The script has all the basic functionality but still needs some polishing.
+The script has all the basic functionality and seems to work pretty well.
 
-I also plan to provide binaries, which can be used as tools for the Arduino IDE 2. And if it all works, it is only a "tiny" step to generalize it to the JTAG and UPDI AVR MCUs. So, stay tuned.
+I also plan to provide binaries, which can be used as tools for the Arduino IDE 2. And if it all works, it is only a "tiny" step to generalize it to the JTAG and/or UPDI AVR MCUs. So, stay tuned.

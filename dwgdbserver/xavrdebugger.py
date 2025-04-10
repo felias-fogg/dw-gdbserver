@@ -40,7 +40,7 @@ class XAvrDebugger(AvrDebugger):
         self.memory_info = deviceinfo.DeviceMemoryInfo(self.device_info)
         # ISP interface in order to program DWEN fuse
         self.spidevice = None
-        if transport.hid_device is not None:
+        if transport and transport.hid_device is not None:
             self.edbg_protocol = EdbgProtocol(transport) # necessary to access target power control
 
 

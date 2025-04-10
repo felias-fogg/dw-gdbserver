@@ -1,5 +1,9 @@
 # Changelog
 
+### V2.1.2 (10-Apr-2025)
+
+- Added: Make a difference between none and too many debuggers (well, it is probably not too relevant for the average user).
+
 ### v2.1.1 (7-Apr-2025)
 
 - Fixed: Fatal errors (wrong MCU, stuck-at-1-bits) during the warm start when connecting with target remote will now be stored and shown again when trying to enable debugWIRE.

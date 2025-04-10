@@ -2341,7 +2341,7 @@ SUBSYSTEM=="usb", ATTRS{idVendor}=="03eb", ATTRS{idProduct}=="2180", MODE="0666"
         getLogger('pyedbglib').setLevel(logging.INFO)
     if args.verbose.upper() != "DEBUG":
         # suppress messages from hidtransport
-        getLogger('pyedbglib.hidtransport.hidtransportbase').setLevel(logging.CRITICAL)
+        getLogger('pyedbglib.hidtransport.hidtransportbase').setLevel(logging.ERROR)
         # suppress spurious error messages from pyedbglib
         getLogger('pyedbglib.protocols').setLevel(logging.CRITICAL)
         # suppress errors of not connecting: It is intended!
@@ -2384,39 +2384,43 @@ SUBSYSTEM=="usb", ATTRS{idVendor}=="03eb", ATTRS{idProduct}=="2180", MODE="0666"
         sys.exit(1)
 
     if args.tool == "dwlink":
-        return dwlink.main(args)
-
-    # Use pymcuprog backend for initial connection here
-    backend = Backend()
-    toolconnection = _setup_tool_connection(args, logger)
-
-    try:
-        backend.connect_to_tool(toolconnection)
-    except usb.core.NoBackendError as e:
-        no_backend_error = True
-        logger.critical("Could not connect to hardware debugger: %s", e)
-        if platform.system() == 'Darwin':
-            logger.critical("Install libusb: 'brew install libusb'")
-            logger.critical("Maybe consult: " +
-                            "https://github.com/greatscottgadgets/cynthion/issues/136")
-        elif platform.system() == 'Linux':
-            logger.critical("Install libusb: 'sudo apt install libusb-1.0-0'")
-        else:
-            logger.critical("This error should not happen!")
-    except pymcuprog.pymcuprog_errors.PymcuprogToolConnectionError:
-        dwlink.main(args)
+        dwlink.main(args) # if we return, then there is no HW debugger
         no_hw_dbg_error = True
-    finally:
-        backend.disconnect_from_tool()
-
-    transport = hid_transport()
-    if not no_backend_error:
-        transport.connect(serial_number=toolconnection.serialnumber,
-                              product=toolconnection.tool_name)
-    if not no_backend_error and not no_hw_dbg_error:
-        logger.info("Connected to %s", transport.hid_device.get_product_string())
+        logger.critical("No hardware debugger discovered")
     else:
-        if platform.system() == 'Linux' and no_hw_dbg_error:
+        # Use pymcuprog backend for initial connection here
+        backend = Backend()
+        toolconnection = _setup_tool_connection(args, logger)
+
+        try:
+            backend.connect_to_tool(toolconnection)
+        except usb.core.NoBackendError as e:
+            no_backend_error = True
+            logger.critical("Could not connect to hardware debugger: %s", e)
+            if platform.system() == 'Darwin':
+                logger.critical("Install libusb: 'brew install libusb'")
+                logger.critical("Maybe consult: " +
+                                "https://github.com/greatscottgadgets/cynthion/issues/136")
+            elif platform.system() == 'Linux':
+                logger.critical("Install libusb: 'sudo apt install libusb-1.0-0'")
+            else:
+                logger.critical("This error should not happen!")
+        except pymcuprog.pymcuprog_errors.PymcuprogToolConnectionError as e:
+            dwlink.main(args)
+            no_hw_dbg_error = True
+        finally:
+            backend.disconnect_from_tool()
+
+        transport = hid_transport()
+        if len(transport.devices) > 1:
+            logger.critical("Too many hardware debuggers connected")
+        if len(transport.devices) == 0 and no_hw_dbg_error:
+            logger.critical("No hardware debugger discovered")
+        if not no_backend_error and not no_hw_dbg_error:
+            transport.connect(serial_number=toolconnection.serialnumber,
+                                product=toolconnection.tool_name)
+            logger.info("Connected to %s", transport.hid_device.get_product_string())
+        elif platform.system() == 'Linux' and no_hw_dbg_error and len(transport.devices) == 0:
             logger.critical("Perhaps you need to install the udev rules first:\n" +
                                 "'sudo %s --install-udev-rules'", __file__)
 
@@ -2425,11 +2429,9 @@ SUBSYSTEM=="usb", ATTRS{idVendor}=="03eb", ATTRS{idProduct}=="2180", MODE="0666"
     server = AvrGdbRspServer(avrdebugger, device, args.port, no_backend_error, no_hw_dbg_error)
     try:
         server.serve()
-
     except (EndOfSession, SystemExit, KeyboardInterrupt):
         logger.info("End of session")
         return 0
-
     except (ValueError, Exception) as e:
         if logger.getEffectiveLevel() != logging.DEBUG:
             logger.critical("Fatal Error: %s",e)
