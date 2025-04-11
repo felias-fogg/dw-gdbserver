@@ -1,5 +1,9 @@
 # Changelog
 
+### V2.1.3 (11-Apr-2025)
+
+- Refined the messages concerning the installation of udev rules.
+
 ### V2.1.2 (10-Apr-2025)
 
 - Added: Make a difference between none and too many debuggers (well, it is probably not too relevant for the average user).

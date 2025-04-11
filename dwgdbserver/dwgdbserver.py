@@ -7,6 +7,7 @@ debugWIRE GDBServer
 import platform
 import importlib.metadata
 import sys
+import os
 import argparse
 import logging
 from logging import getLogger
@@ -1764,7 +1765,7 @@ class MonitorCommand():
             return("", "Flash memory will not be cached")
         return self._mon_unknown(tokens[0])
 
-    # pylint: disable=too-many-return-statements
+    # pylint: disable=too-many-return-statements, too-many-branches
     def _mon_debugwire(self, tokens):
         if self._no_backend_error:
             if platform.system() == 'Linux':
@@ -1775,10 +1776,17 @@ class MonitorCommand():
                            "'brew install libusb'")
             return("", "Could not connect via USB. Should not have happened!")
         if self._no_hw_dbg_error:
+            if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+                path_to_prog, _ = os.path.split((sys._MEIPASS)[:-1]) #pylint: disable=protected-access
+                path_to_prog +=  '/dw-gdbserver'
+            else:
+                path_to_prog = 'dw-gdbserver'
             return("", "No hardware debugger discovered.\n" +
                        "Debugging cannot be activated." +
-                       (("\nPerhaps you need to install the udev rules first:\n" +
-                             "'sudo %s --install-udev-rules'" % __file__)\
+                       ((("\nPerhaps you need to install the udev rules first:\n" +
+                             "'sudo %s --install-udev-rules'\n" +
+                             "and then unplug and replug the debugger.") %
+                         path_to_prog)\
                         if platform.system() == 'Linux' else ""))
         if tokens[0] =="":
             if self._dw_mode_active:
@@ -2421,8 +2429,14 @@ SUBSYSTEM=="usb", ATTRS{idVendor}=="03eb", ATTRS{idProduct}=="2180", MODE="0666"
                                 product=toolconnection.tool_name)
             logger.info("Connected to %s", transport.hid_device.get_product_string())
         elif platform.system() == 'Linux' and no_hw_dbg_error and len(transport.devices) == 0:
-            logger.critical("Perhaps you need to install the udev rules first:\n" +
-                                "'sudo %s --install-udev-rules'", __file__)
+            if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+                path_to_prog, _ = os.path.split((sys._MEIPASS)[:-1]) #pylint: disable=protected-access
+                path_to_prog +=  '/dw-gdbserver'
+            else:
+                path_to_prog = 'dw-gdbserver'
+            logger.critical(("Perhaps you need to install the udev rules first:\n"
+                             "'sudo %s --install-udev-rules'\n" +
+                             "and then unplug and replug the debugger."), path_to_prog)
 
     logger.info("Starting dw-gdbserver")
     avrdebugger = XAvrDebugger(transport, device)
