@@ -1,5 +1,9 @@
 # Changelog
 
+### V2.1.4 (12-Apr-2025)
+
+- Fixed: Removed the non-emptiness test for the result of writing something to memory in `Memory.writemem`. This led to a load error when using a debugger with EXPAT support, but would have also affected other write operations.
+
 ### V2.1.3 (11-Apr-2025)
 
 - Refined the messages concerning the installation of udev rules.

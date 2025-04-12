@@ -899,9 +899,7 @@ class Memory():
         iaddr, _, method = self.mem_area(addr)
         if not data:
             return "OK"
-        result = method(iaddr, data)
-        if not result:
-            return "E14"
+        method(iaddr, data)
         return "OK"
 
     def mem_area(self, addr):
