@@ -2374,10 +2374,11 @@ SUBSYSTEM=="usb", ATTRS{idVendor}=="03eb", ATTRS{idProduct}=="2180", MODE="0666"
     args, unknown = parser.parse_known_args()
 
     if args.cmd:
-        args.cmd = args.cmd.strip()
+        args.cmd = args.cmd
         portcmd = [c for c in args.cmd if 'gdb_port' in c]
         if portcmd:
-            args.port = int(portcmd[0][9:])
+            cmd = portcmd[0]
+            args.port = int(cmd[cmd.index('gdb_port')+len('gdb_port'):])
 
     # Setup logging
     if args.verbose:

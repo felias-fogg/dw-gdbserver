@@ -1,5 +1,9 @@
 # Changelog
 
+### V2.1.6 (14-Apr-2015)
+
+- Fixed: Since multiple -c options are possible, applying the strip method does not work. Instead, we deal with the single command now.
+
 ### V2.1.5 (13-Apr-2025)
 
 - Fixed: Gede is now supported (and not only announced as an option)
