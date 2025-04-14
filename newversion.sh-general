@@ -1,0 +1,8 @@
+#!/bin/bash
+arch=XXX
+poetry install
+poetry run pyinstaller --noconfirm dw-gdbserver.spec
+rm -rf binaries/${arch}/dw-gdbserver*
+mv dist/dw-gdbserver/dw-gdbserver* binaries/${arch}/
+git add binaries/${arch}/
+git commit -a -m "${arch} binaries - `./binaries/${arch}/dw-gdbserver -V`"
