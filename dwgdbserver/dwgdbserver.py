@@ -12,6 +12,9 @@ import argparse
 import logging
 from logging import getLogger
 import textwrap
+import shutil
+import shlex
+import subprocess
 
 # utilities
 import binascii
@@ -39,6 +42,7 @@ from dwgdbserver import dwlink
 from dwgdbserver.xavrdebugger import XAvrDebugger
 from dwgdbserver.deviceinfo.devices.alldevices import dev_id, dev_name
 
+# signal codes
 NOSIG   = 0     # no signal
 SIGHUP  = 1     # no connection
 SIGINT  = 2     # Interrupt  - user interrupted the program (UART ISR)
@@ -47,6 +51,9 @@ SIGTRAP = 5     # Trace trap  - stopped on a breakpoint
 SIGABRT = 6     # Abort because of a fatal error or no breakpoint available
 SIGBUS = 10     # Segmentation violation means in our case stack overflow
 
+# special opcodes
+BREAKCODE = 0x9598
+SLEEPCODE = 0x9588
 
 class EndOfSession(Exception):
     """Termination of session"""
@@ -176,10 +183,13 @@ class GdbHandler():
         if packet:
             newpc = int(packet,16)
             self.logger.debug("Set PC to 0x%X before resuming execution", newpc)
-        if self.bp.resume_execution(newpc) == SIGABRT:
+        sig = self.bp.resume_execution(newpc)
+        if sig == SIGABRT:
             self.send_debug_message("Too many breakpoints set")
             self.send_signal(SIGABRT)
-
+        if sig == SIGILL:
+            self.send_debug_message("Cannot continue because of BREAK instruction")
+            self.send_signal(SIGILL)
 
     def _continue_with_signal_handler(self, packet):
         """
@@ -535,6 +545,8 @@ class GdbHandler():
                 sig = self.bp.range_step(int(step_range[0],16), int(step_range[1],16))
                 if sig == SIGABRT:
                     self.send_debug_message("Too many breakpoints set")
+                if sig == SIGILL:
+                    self.send_debug_message("Cannot continue because of BREAK instruction")
                 self.send_signal(sig)
             else:
                 self.send_packet("") # unknown
@@ -633,7 +645,7 @@ class GdbHandler():
         will disconnect, in extended-remote it will not, and you can restart or load a modified
         file and run that one.
         """
-        self.logger.debug("RSP packet: kill process, will reset CPU")
+        self.logger.debug("RSP packet: kill process, will reset MCU")
         if self.mon.is_dw_mode_active():
             self.dbg.reset()
         self.send_packet("OK")
@@ -651,7 +663,7 @@ class GdbHandler():
             self.send_debug_message("Enable debugWIRE first: 'monitor debugwire on'")
             self.send_signal(SIGHUP)
             return
-        self.logger.debug("Resetting CPU and wait for start")
+        self.logger.debug("Resetting MCU and wait for start")
         self.dbg.reset()
         self.send_signal(SIGTRAP)
 
@@ -1243,6 +1255,14 @@ class BreakAndExec():
             self.dbg.program_counter_write(addr>>1)
         else:
             addr = self.dbg.program_counter_read() << 1
+        opcode = self._read_flash_word(addr)
+        if opcode == BREAKCODE: # this should not happen!
+            self.logger.debug("Stopping execution in 'single-step' because of BREAK instruction")
+            return SIGILL
+        if opcode == SLEEPCODE: # ignore sleep
+            self.logger.debug("Ignoring sleep in 'single-step'")
+            addr += 2
+            self.dbg.program_counter_write(addr>>1)
         if self.mon.is_old_exec():
             self.dbg.run()
             return None
@@ -1255,6 +1275,7 @@ class BreakAndExec():
             self.dbg.run()
         return None
 
+    #pylint: disable=too-many-return-statements, too-many-statements
     def single_step(self, addr):
         """
         Perform a single step. If at the current location, there is a software breakpoint,
@@ -1273,6 +1294,15 @@ class BreakAndExec():
         else:
             addr = self.dbg.program_counter_read() << 1
         self.logger.debug("One single step at 0x%X", addr)
+        opcode = self._read_flash_word(addr)
+        if opcode == BREAKCODE: # this should not happen!
+            self.logger.debug("Stopping execution in 'single-step' because of BREAK instruction")
+            return SIGILL
+        if opcode == SLEEPCODE: # ignore sleep
+            self.logger.debug("Ignoring sleep in 'single-step'")
+            addr += 2
+            self.dbg.program_counter_write(addr>>1)
+            return SIGTRAP
         if self.mon.is_old_exec():
             self.dbg.step()
             return SIGTRAP
@@ -1358,6 +1388,9 @@ class BreakAndExec():
             self.logger.error("PC 0x%X outside of range boundary", addr)
             return self.single_step(None)
         if addr in self._range_exit: # starting at possible exit point inside range
+            return self.single_step(None)
+        opcode = self._read_flash_word(addr)
+        if opcode in { BREAKCODE, SLEEPCODE }:
             return self.single_step(None)
         if len(self._range_exit) == reservehwbps: # we can cover all exit points!
             # if more HWBPs, one could use them here!
@@ -1968,6 +2001,8 @@ class DebugWIRE():
         otherwise true. If not graceful, an exception is thrown when we are
         unsuccessul in establishing the connection.
         """
+        if graceful:
+            self.logger.info("debugWIRE warm start")
         try:
             self.dbg.setup_session(self._devicename)
             idbytes = self.dbg.device.read_device_id()
@@ -1980,6 +2015,7 @@ class DebugWIRE():
         except Exception as e: # pylint: disable=broad-exception-caught
             if graceful:
                 self.logger.debug("Graceful exception: %s",e)
+                self.logger.info("Warm start was unsuccessful")
                 return False  # we will try to connect later
             raise
         # Check device signature
@@ -2017,6 +2053,7 @@ class DebugWIRE():
         callback is Null or returns False, we wait for a manual power cycle.
         Otherwise, we assume that the callback function does the job.
         """
+        self.logger.info("debugWIRE cold start")
         try:
             self.enable(erase_if_locked=allow_erase)
             self.power_cycle(callback=callback)
@@ -2027,7 +2064,7 @@ class DebugWIRE():
             if not graceful:
                 raise
         # end current tool session and start a new one
-        self.logger.info("Restarting the debugging tool before entering debugWIRE mode")
+        self.logger.info("Restarting the debug tool before entering debugWIRE mode")
         self.dbg.housekeeper.end_session()
         self.dbg.housekeeper.start_session()
         # now start the debugWIRE session
@@ -2047,6 +2084,7 @@ class DebugWIRE():
             magic = callback()
         if magic: # callback has done all the work
             return
+        self.logger.info("Restarting the debug tool before power-cycling")
         self.dbg.housekeeper.end_session() # might be necessary after an unsuccessful power-cycle
         self.dbg.housekeeper.start_session()
         while time.monotonic() - wait_start < 150:
@@ -2077,6 +2115,7 @@ class DebugWIRE():
         # clear all breakpoints
         self.dbg.software_breakpoint_clear_all()
         # disable DW
+        self.logger.info("Leaving debugWIRE mode")
         self.dbg.device.avr.protocol.debugwire_disable()
         # detach from OCD
         self.dbg.device.avr.protocol.detach()
@@ -2087,12 +2126,14 @@ class DebugWIRE():
         self.dbg.housekeeper.end_session()
         self.dbg.housekeeper.start_session()
         # now open an ISP programming session again
+        self.logger.info("Reconnecting in ISP mode")
         self.spidevice = NvmAccessProviderCmsisDapSpi(self.dbg.transport, self.dbg.device_info)
         self.spidevice.isp.enter_progmode()
         fuses = self.spidevice.read(self.dbg.memory_info.memory_info_by_name('fuses'), 0, 3)
         self.logger.debug("Fuses read: %X %X %X",fuses[0], fuses[1], fuses[2])
         fuses[1] |= self.dbg.device_info['dwen_mask']
         self.logger.debug("New high fuse: 0x%X", fuses[1])
+        self.logger.info("Unprogramming DWEN fuse")
         self.spidevice.write(self.dbg.memory_info.memory_info_by_name('fuses'), 1,
                                          fuses[1:2])
         fuses = self.spidevice.read(self.dbg.memory_info.memory_info_by_name('fuses'), 0, 3)
@@ -2137,10 +2178,12 @@ class DebugWIRE():
                                      bfuse, fuses[bfuse:bfuse+1])
         # program the DWEN bit
         # leaving and re-entering programming mode is necessary, otherwise write has no effect
+        self.logger.info("Reentering programming mode")
         self.spidevice.isp.leave_progmode()
         self.spidevice.isp.enter_progmode()
         fuses[1] &= (0xFF & ~(self.dbg.device_info['dwen_mask']))
         self.logger.debug("New high fuse: 0x%X", fuses[1])
+        self.logger.info("Programming DWEN fuse")
         self.spidevice.write(self.dbg.memory_info.memory_info_by_name('fuses'), 1, fuses[1:2])
         # needs to be done twice!
         fuses = self.spidevice.read(self.dbg.memory_info.memory_info_by_name('fuses'), 0, 3)
@@ -2331,11 +2374,14 @@ SUBSYSTEM=="usb", ATTRS{idVendor}=="03eb", ATTRS{idProduct}=="2180", MODE="0666"
     args, unknown = parser.parse_known_args()
 
     if args.cmd:
+        args.cmd = args.cmd.strip()
         portcmd = [c for c in args.cmd if 'gdb_port' in c]
         if portcmd:
             args.port = int(portcmd[0][9:])
 
     # Setup logging
+    if args.verbose:
+        args.verbose = args.verbose.strip()
     if args.verbose.upper() in ["INFO", "WARNING", "ERROR", "CRITICAL"]:
         form = "[%(levelname)s] %(message)s"
     else:
@@ -2362,6 +2408,8 @@ SUBSYSTEM=="usb", ATTRS{idVendor}=="03eb", ATTRS{idProduct}=="2180", MODE="0666"
         print("dw-gdbserver version {}".format(importlib.metadata.version("dwgdbserver")))
         return 0
 
+    if args.dev:
+        args.dev = args.dev.strip()
     if args.dev and args.dev == "?":
         print("Supported devices:")
         for d in sorted(dev_id):
@@ -2389,6 +2437,8 @@ SUBSYSTEM=="usb", ATTRS{idVendor}=="03eb", ATTRS{idProduct}=="2180", MODE="0666"
         logger.critical("Device '%s' is not supported by dw-gdbserver", device)
         sys.exit(1)
 
+    if args.tool:
+        args.tool = args.tool.strip()
     if args.tool == "dwlink":
         dwlink.main(args) # if we return, then there is no HW debugger
         no_hw_dbg_error = True
@@ -2439,6 +2489,16 @@ SUBSYSTEM=="usb", ATTRS{idVendor}=="03eb", ATTRS{idProduct}=="2180", MODE="0666"
     logger.info("Starting dw-gdbserver")
     avrdebugger = XAvrDebugger(transport, device)
     server = AvrGdbRspServer(avrdebugger, device, args.port, no_backend_error, no_hw_dbg_error)
+
+    if args.gede:
+        args.prg = "gede"
+    if args.prg and args.prg != "noop":
+        args.prg = args.prg.strip()
+        logger.info("Starting %s", args.prg)
+        cmd = shlex.split(args.prg)
+        cmd[0] = shutil.which(cmd[0])
+        subprocess.Popen(cmd) # pylint: disable=consider-using-with
+
     try:
         server.serve()
     except (EndOfSession, SystemExit, KeyboardInterrupt):

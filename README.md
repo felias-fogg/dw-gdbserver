@@ -1,6 +1,6 @@
 # dw-gdbserver
 
-This Python script acts as a [gdbserver](https://sourceware.org/gdb/current/onlinedocs/gdb.html/Server.html#Server) for [*debugWIRE*](https://debugwire.de) MCUs, such as the ATmega328P.  It can communicate with Microchip debuggers such as [Atmel-ICE](https://www.microchip.com/en-us/development-tool/atatmel-ice) and [MPLAB SNAP](https://www.microchip.com/en-us/development-tool/pg164100) (in AVR mode), and it provides a pass-through service for the DIY hardware debugger [dw-link](https://github.com/felias-fogg/dw-link). For Microchip debuggers, it uses the infrastructure provided by [pymcuprog](https://github.com/microchip-pic-avr-tools/pymcuprog) and [pyedgblib](https://github.com/microchip-pic-avr-tools/pyedbglib) to implement a full-blown gdbserver.
+This Python script acts as a [gdbserver](https://sourceware.org/gdb/current/onlinedocs/gdb.html/Server.html#Server) for [*debugWIRE*](https://debugwire.de) MCUs, such as the ATmega328P.  It can communicate with Microchip debuggers such as [Atmel-ICE](https://www.microchip.com/en-us/development-tool/atatmel-ice) and [MPLAB SNAP](https://www.microchip.com/en-us/development-tool/pg164100) (in AVR mode), and it provides a pass-through service for the DIY hardware debugger [dw-link](https://github.com/felias-fogg/dw-link). For Microchip debuggers, it uses the infrastructure provided by [pymcuprog](https://github.com/microchip-pic-avr-tools/pymcuprog) and [pyedgblib](https://github.com/microchip-pic-avr-tools/pyedbglib) to implement a full-blown gdbserver. With dw-gdbserver, you can utilize the built-in symbolic debuggers of IDEs such as Arduino IDE 2 or PlatformIO.
 
 By the way, switching to AVR mode in the SNAP debugger is easily accomplished by using avrdude (>= Version 7.3):
 
@@ -8,17 +8,25 @@ By the way, switching to AVR mode in the SNAP debugger is easily accomplished by
 > avrdude -c snap_isp -Pusb -xmode=avr
 ```
 
-With PICkit4 it is similar. When you repeat this command, and you get the message again that the debugger is in 'PIC' mode, you need to flash new firmware first using MPLAB X.
+With PICkit4 it is similar:
 
-### Installation
+```
+> avrdude -c pickit4_isp -Pusb -xmode=avr
+```
 
-#### Pypi installation
+In both cases, you can check whether you were successful by typing the same command again. If you get the message that the debugger is still in 'PIC' mode, you need to flash new firmware first using MPLAB X.
 
-I assume that you already have a recent Python version installed (>=3.9).
+## Installation
+
+If you want to use dw-gdbserver as part of Arduino IDE 2, you do not need to install it explicitly. It is enough [to add an "additional boards manager URL" and install the respective core](#Arduino-IDE-2).
+
+### PyPI installation
+
+I assume you already installed a recent Python version (>=3.9).
 
 It will be necessary to install [pipx](https://pipx.pypa.io/) first. If you have not done so, follow the instructions on the [pipx website](https://pipx.pypa.io/stable/installation/). Then proceed as follows.
 
-##### Linux
+#### Linux
 
 ```
 > pipx install dwgdbserver
@@ -26,9 +34,9 @@ It will be necessary to install [pipx](https://pipx.pypa.io/) first. If you have
 > sudo ~/.local/bin/dw-gdbserver --install-udev-rules
 ```
 
-After restarting your shell, you can invoke the gdbserver by simply typing `dw-gdbserver` into a shell. The binary is stored under `~/.local/bin/`
+After unplugging and replugging the debugger and restarting your shell, you can invoke the gdbserver by simply typing `dw-gdbserver` into a shell. The binary is stored under `~/.local/bin/`
 
-##### macOS
+#### macOS
 
 ```
 > pipx install dwgdbserver
@@ -36,18 +44,18 @@ After restarting your shell, you can invoke the gdbserver by simply typing `dw-g
 > brew install libusb
 ```
 
-After restarting the shell, you should be able to start the gdbserver.
+After restarting the shell, you should be able to start the gdbserver. The binary is stored under `~/.local/bin/`
 
-##### Windows
+#### Windows
 
 ```
 > pipx install dwgdbserver
 > pipx ensurepath
 ```
 
-Again, you need to restart the shell, and then you can type in `dw-gdbserver.exe` when you want to start the gdbserver.
+Again, you need to restart the shell, and then you can type in `dw-gdbserver.exe` when you want to start the gdbserver. The binary is stored under `~/.local/bin/`
 
-#### GitHub installation
+### GitHub installation
 
 Alternatively, you can download/clone the GitHub repository. You need then to install the package poetry:
 
@@ -68,13 +76,13 @@ Furthermore, you can create a binary standalone package as follows:
 > poetry run pyinstaller dw-gdbserver.spec
 ```
 
-After that, you find an executable `dw-gdbserver` (or `dw-gdbserver.exe`) in the directory `dist/dw-gdbserver/dw-gdbserver/` together with the folder `dw-gdbserver-util`. You can copy those to a place in your `PATH`.
+After that, you find an executable `dw-gdbserver` (or `dw-gdbserver.exe`) in the directory `dist/dw-gdbserver/` together with the folder `dw-gdbserver-util`. You can copy those to a place in your `PATH`.
 
-### Usage
+## Usage
 
 If your target board is an Arduino board, you [must modify it by disconnecting the capacitor responsible for the auto-reset feature](https://debugwire.de/board-modifications/).
 
-Once [you have connected an appropriate hardware debugger to your target board](https://github.com/felias-fogg/dw-gdbserver/blob/main/doc/connecting-debuggers.md), you can start the  gdbserver in a terminal window.
+Once you have [connected a hardware debugger to your target board](https://github.com/felias-fogg/dw-gdbserver/blob/main/doc/connecting-debuggers.md), you can start the  gdbserver in a terminal window.
 
 ```
 > dw-gdbserver -d atmega328p
@@ -113,7 +121,9 @@ Note: automatically using hardware breakpoints for read-only addresses.
 ...
 ```
 
-### Command line options
+If, instead of using a CLI, you want to use an IDE (e.g., Arduino IDE 2) or GUI, there are a [couple of options](doc/ides+guis.md).
+
+## Command line options
 
 | Optionname             | Description                                                  |
 | ---------------------- | ------------------------------------------------------------ |
@@ -127,11 +137,11 @@ Note: automatically using hardware breakpoints for read-only addresses.
 | `--version` <br>`-V`   | Print dw-gdbserver version number and exit.                  |
 | `--install-udev-rules` | Install the udev rules necessary for Microchip's EDBG debuggers. Needs to be run with `sudo` and is only present under Linux. |
 
-### How to get into and out of debugWIRE mode
+## How to get into and out of debugWIRE mode
 
 When the MCU is not already in debugWIRE mode,  you must request the switch to debugWIRE mode using the command `monitor debugwire enable` in GDB. The debugger will then enable the DWEN fuse and either power-cycles the target by itself (if possible) or ask you to power-cycle the target system. Once this is done, the chip will stay in debugWIRE mode, even after terminating the debugging session. In other words, when starting the next debug session, the MCU is already in debugWIRE mode. You can switch back to normal mode using the command `monitor debugwire disable` before leaving the debugger.
 
-### Monitor commands
+## Monitor commands
 
 In addition to the above mentioned command for enabling debugWIRE mode, there are a few other `monitor` commands.
 
@@ -153,7 +163,143 @@ In addition to the above mentioned command for enabling debugWIRE mode, there ar
 
 The default setting is always the first one listed, except for `debugwire`, which depends on the MCU itself. All commands can, as usual, be abbreviated. For example, `mo d e` is equivalent to `monitor debugwire enable`.
 
-### List of supported and tested hardware debuggers
+## Connecting a debugWIRE Debugger to a Target
+
+In principle, only two lines are necessary to connect your hardware debugger to a target chip or board: the debugWIRE line, which is the target chip's RESET line, and GND. However, when one wants to change into and out of debugWIRE mode, change fuses, or upload firmware, it is necessary to connect all 6 SPI programming lines to the target: VTG, GND, RESET, MOSI, MISO, and SCK. For this reason, using all SPI programming lines makes a lot of sense. Moreover, most of the time, an SPI connector is already on the target board.
+
+### SPI programming header
+
+There are two types of SPI programming connectors. The more recent type has six pins, and the older type has 10 pins, as shown in the following diagram (based on a diagram from Wikipedia https://commons.wikimedia.org/wiki/user:Osiixy), which provides a top view of the headers on a PCB.
+
+![ISP headers](docs/pics/Isp_headers.svg.png)
+
+Note the notches on the left side of the headers. Since almost all SPI programming plugs are keyed, you can only plug them in in the correct orientation. However, the headers sometimes do not have notches. In this case, pin 1 is usually marked in some way, either with a dot, a star, or with the number 1. Similarly, plugs also come unkeyed. In this case, again, pin 1 is marked in some way.
+
+### Connecting to targets with an SPI programming header
+
+If the target board has an SPI programming header, it is easy to connect to it. **Atmel-ICE**, **Power Debugge**r, and **JTAGICE3** have a cable you can plug into a 6-pin SPI programming header. If you only have a 10-pin header on the target, you need an adapter. **PICKit4** and **SNAP** do not come with SPI programming headers. However, you can buy an [AVR programming adapter](https://www.microchip.com/en-us/development-tool/ac31s18a) from Microchip, an [adapter PCB from OSH Park](https://oshpark.com/shared_projects/eZiws6Jb), or [a more luxurious version from eBay](https://www.ebay.de/itm/186561251300). Finally, for **dw-link**, I propose preparing a [modified SPI programming cable](https://arduino-craft-corner.de/index.php/2022/01/13/a-debugwire-hardware-debugger-for-less-than-10-e/) or buying the [dw-link probe programmer shield](https://www.tindie.com/products/fogg/dw-link-probe-a-debugwire-hardware-debugger/), which has an SPI programming header on board.
+
+![atmel-ice-connect](docs/pics/atmel-ice-connect.png)
+
+When using one of the commercial debuggers, you need to power the target board from an external source. With dw-link, you can choose to power the target board from the debugger or an external source.
+
+### Connecting to targets without an SPI programming header
+
+If the target does not feature an SPI programming header, you need to connect 6 cables. If you are working with a breadboard, you may consider buying an [SPI header breadboard adapter](https://www.adafruit.com/product/1465). Otherwise, you need to connect each pin individually. **Atmel-ICE**, **Power Debugge**r, and **JTAGICE3** have a so-called 10-pin mini-squid cable. The pin mapping for those debuggers is as follows.
+
+| Atmel Debugger | Mini-squid pin | Target pin | SPI pin |
+| -------------- | -------------- | ---------- | ------- |
+| Pin 1 (TCK)    | 1              | SCK        | 3       |
+| Pin 2 (GND)    | 2              | GND        | 6       |
+| Pin 3 (TDO)    | 3              | MISO       | 1       |
+| Pin 4 (VTG)    | 4              | VTG        | 2       |
+| Pin 5 (TMS)    | 5              | &nbsp;     | &nbsp;  |
+| Pin 6 (nSRST)  | 6              | RESET      | 5       |
+| Pin  (N.C.)    | 7&nbsp;        | &nbsp;     | &nbsp;  |
+| Pin 8 (nTRST)  | 8              | &nbsp;     | &nbsp;  |
+| Pin 9 (TDI)    | 9              | MOSI       | 4       |
+| Pin 10 (GND)   | 0              | &nbsp;     | &nbsp;  |
+
+For **PICkit4** and **SNAP**, such a table looks as follows, with pin 1 marked by a triangle.
+
+| MBLAP Debugger | Pin # | Target pin | SPI pin |
+| -------------- | ----- | ---------- | ------- |
+| Pin 1 (TVPP)   | 1     | &nbsp;     | &nbsp;  |
+| Pin 2 (TVDD)   | 2     | VTG        | 2       |
+| Pin 3 (GND)    | 3     | GND        | 6       |
+| Pin 4 (PGD)    | 4     | MISO       | 1       |
+| Pin 5 (PGC)    | 5     | SCK        | 3       |
+| Pin 6 (TAUX)   | 6     | RESET      | 5       |
+| Pin 7 (TTDI)   | 7     | MOSI       | 4       |
+| Pin 8 (TTMS)   | 8     | &nbsp;     | &nbsp;  |
+
+![picki4-connect](docs/pics/pickit4-connect.png)
+
+When you want to connect a **dw-link** debugger without a dw-link probe shield to a target, you can use jumper cables using the following pin mapping.
+
+| dw-link Arduino Uno pins    | Target pin | SPI pin |
+| --------------------------- | ---------- | ------- |
+| D8                          | RESET      | 5       |
+| D11                         | MOSI       | 4       |
+| D12                         | MISO       | 1       |
+| D13                         | SCK        | 3       |
+| 5V (if powered by debugger) | Vcc        | 2       |
+| GND                         | GND        | 6       |
+
+ When you have a dw-link probe shield, it is best to construct or buy a cable with a 6-pin SPI programming plug on one end and single DuPont pins on the other.
+
+## Integrated Development Environments and Graphical User Interfaces
+
+There are several possible options for using an IDE or a GUI that make use dw-gdbserver to enable a debugging solution.
+
+### Arduino IDE 2
+
+Arduino IDE 2 is probably the most straightforward option. You only need to add an `Additional Boards Manager URL` in the `Preference` dialog. Currently, only [MiniCore](https://github.com/MCUdude/MiniCore) is supported, and you need to add the following line:
+
+```
+https://felias-fogg.github.io/MiniCore/package_MCUdude_MiniCore_index.json
+```
+
+After that, you must install the [MiniCore](https://github.com/MCUdude/MiniCore) package, which enables you to debug all ATmegaX8(P)(B) MCUs. And this is all! Now, you can press the debug button and start debugging. See, e.g., this [short tutorial](https://docs.arduino.cc/software/ide-v2/tutorials/ide-v2-debugger/) about debugging in the Arduino IDE 2
+
+Linux users may need to add a few udev rules. When you first start the Arduino IDE debugger and the hardware debuggers are not recognized, you will get a hint in the `gdb-server` window of how to set the udev rules. You simply have to execute dw-gdbserver once using the command line option `--install-udev-rules`.
+
+### PlatformIO and Visual Studio Code
+
+PlatformIO is a cross-platform, cross-architecture, multiple framework professional tool for embedded systems engineers. Installed as an extension to the popular Visual Studio Code, it provides a powerful IDE for embedded programming and debugging. Using the `platformio.ini` file, integrating an external debugging framework is very easy. If you want to debug a program on an ATmega328P, the `platformio.ini` file could look as follows:
+
+```
+[platformio]
+default_envs = debug
+
+[env:debug]
+extends = env:atmega328p              ;; <--- substitute the right board here
+build_type = debug
+debug_tool = custom
+debug_server = /path/to/dw-gdbserver  ;; <-- specify path to gdbserver
+    --port=3333
+    --device=${env:debug.board}
+debug_init_cmds =
+    define pio_reset_halt_target
+         monitor reset
+    end
+    define pio_reset_run_target
+         monitor reset
+	       continue
+    end
+    target remote $DEBUG_PORT
+    monitor debugwire enable
+    $LOAD_CMDS
+    $INIT_BREAK
+debug_build_flags =
+    -Og
+    -ggdb3
+
+[env:atmega328p]
+platform = atmelavr
+framework = arduino
+board = ATmega328P
+board_build.f_cpu = 16000000L
+board_hardware.oscillator = external
+
+
+```
+
+Note that the debug environment should be the default one. It should be the first if no default environment has been declared.
+
+### Gede
+
+[Gede](https://github.com/jhn98032/gede) is a lean and clean GUI for GDB. It can be built and run on almost all Linux distros, FreeBSD, and macOS. You need an avr-gdb client with a version >= 10.2. If you have installed Gede somewhere in your PATH, you can start it by specifying the option `--gede` or `-g` when starting dw-gdbserver.
+
+![Gede](docs/pics/gede.png)
+
+`Project dir` and `Program` are specific to your debugging session. The rest should be copied as it is shown. Before you click `OK`, you should switch to the `Commands` section, where you need to enter the command `monitor debugwire enable`.
+
+![Command section](docs/pics/gede-cmds.png)
+
+Clicking on OK, you start a debugging session. The startup may take a while because the debugger always loads the object file into memory.
+
+## List of supported and tested hardware debuggers
 
 Except for [dw-link](https://github.com/felias-fogg/dw-link), this list is copied from the readme file of [pyedbglib](https://github.com/microchip-pic-avr-tools/pyedbglib). Boldface means that the debuggers have been tested by me and work with this Python script.
 
@@ -163,11 +309,11 @@ Except for [dw-link](https://github.com/felias-fogg/dw-link), this list is copie
 * **Atmel-ICE**
 * **Atmel Power Debugger**
 * **mEDBG - on-board debugger on Xplained Mini/Nano**
-* JTAGICE3 (firmware version 3.0 or newer)
+* **JTAGICE3 (firmware version 3.0 or newer)**
 * **[dw-link](https://github.com/felias-fogg/dw-link)** - **DIY debugWIRE debugger running on an Arduino UNO R3**
 
 
-### List of supported and tested MCUs
+## List of supported and tested MCUs
 
 This is the list of all debugWIRE MCUs, which should all be compatible with dw-gdbserver. MCUs tested with this Python script are marked bold. MCUs known not to work with the script are struck out. For the list of MCUs compatible with dw-link, you need to consult the [dw-link manual](https://github.com/felias-fogg/dw-link/blob/master/docs/manual.md).
 
@@ -207,9 +353,7 @@ The ATmega48 and ATmega88 (without the A-suffix) sitting on my desk suffer from 
 * AT90PWM216, AT90PWM316
 * ATmega8HVA, ATmega16HVA, ATmega16HVB, ATmega32HVA, ATmega32HVB, ATmega64HVE2
 
-
-
-### Notes for Linux systems
+## Notes for Linux systems
 
 The following text is copied verbatim from the README of pyedbglib. The udev rules will be added when you call dw-gdbserver with the option --install-udev-rules in sudo-mode. Permission for serial lines, as described in the end, needs to be set manually. However, the hardware debuggers only use USB.
 
@@ -255,7 +399,7 @@ The following text is copied verbatim from the README of pyedbglib. The udev rul
 
 
 
-### What the future has in store for us
+## What the future has in store for us
 
 The script has all the basic functionality and seems to work pretty well.
 

@@ -153,3 +153,12 @@ class XAvrDebugger(AvrDebugger):
         """
         self.logger.debug("Writing register file")
         self.device.avr.regfile_write(regs)
+
+    def reset(self):
+        """
+        Reset the AVR core.
+        The PC will point to the first instruction to be executed.
+        """
+        self.logger.info("MCU reset")
+        self.device.avr.protocol.reset()
+        self._wait_for_break()

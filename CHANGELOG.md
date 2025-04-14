@@ -1,8 +1,19 @@
 # Changelog
 
+### V2.1.5 (13-Apr-2025)
+
+- Fixed: Gede is now supported (and not only announced as an option)
+- Fixed: Leading and trailing spaces are removed from command line arguments. A leading space happened when specifying an option in the `platformio.ini` file.
+- Added: Section about how to use dw-gdbserver in different IDEs/GUIs
+- Fixed: When starting or single-stepping (also when range-stepping) at a location that contains a user supplied BREAK instruction, we stop with SIGILL (because otherwise we run into an endless loop).
+- Fixed: When single-stepping a SLEEP instruction, we simply advance
+the PC. Otherwise, we might just got stuck at this point.
+- Added: A few info logs when enabling/disabling debugWIRE
+- Added: Info log for MCU reset
+
 ### V2.1.4 (12-Apr-2025)
 
-- Fixed: Removed the non-emptiness test for the result of writing something to memory in `Memory.writemem`. This led to a load error when using a debugger with EXPAT support, but would have also affected other write operations.
+- Fixed: Removed the non-emptiness test for the result of writing something to memory in `Memory.writemem`. This test led to a load error when using a debugger without EXPAT support, but would have also affected other write operations.
 
 ### V2.1.3 (11-Apr-2025)
 

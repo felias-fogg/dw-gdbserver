@@ -6,7 +6,7 @@ import logging
 from unittest.mock import Mock, call, create_autospec
 from unittest import TestCase
 from dwgdbserver.xavrdebugger import XAvrDebugger
-from dwgdbserver.dwgdbserver import MonitorCommand, BreakAndExec, SIGTRAP, SIGABRT
+from dwgdbserver.dwgdbserver import MonitorCommand, BreakAndExec, SIGTRAP, SIGABRT, SIGILL, BREAKCODE, SLEEPCODE
 from .util.instr import instrmap
 
 logging.basicConfig(level=logging.CRITICAL)
@@ -37,11 +37,11 @@ class TestBreakAndExec(TestCase):
 
     def test_insert_breakpoints_regular(self):
         self.bp.mon.is_onlyhwbps.return_value = False
-        self.bp._read_flash_word.side_effect = [ 0x9598, 0x1111, 0x2222, 0x3333 ]
+        self.bp._read_flash_word.side_effect = [ BREAKCODE, 0x1111, 0x2222, 0x3333 ]
         self.bp.insert_breakpoint(100)
         self.bp.insert_breakpoint(200)
         self.assertEqual(self.bp._bp, {100: {'inuse' : True, 'active': True, 'inflash': False, 'hwbp' : None,
-                                    'opcode': 0x9598, 'secondword' : 0x1111, 'timestamp' : 1 },
+                                    'opcode': BREAKCODE, 'secondword' : 0x1111, 'timestamp' : 1 },
                                        200:  {'inuse' : True, 'active': True, 'inflash': False, 'hwbp' : None,
                                     'opcode': 0x2222, 'secondword' : 0x3333, 'timestamp' : 2 }})
 
@@ -53,7 +53,7 @@ class TestBreakAndExec(TestCase):
     def test_remove_breakpoints_regular_idempotent(self):
         self.bp.mon.is_onlyhwbps.return_value = False
         self.bp._bp = {100: {'inuse' : True, 'active': True, 'inflash': False, 'hwbp' : None,
-                                 'opcode': 0x9598, 'secondword' : 0x1111, 'timestamp' : 1 },
+                                 'opcode': BREAKCODE, 'secondword' : 0x1111, 'timestamp' : 1 },
                        200:  {'inuse' : True, 'active': True, 'inflash': False, 'hwbp' : None,
                                   'opcode': 0x2222, 'secondword' : 0x3333, 'timestamp' : 2 }}
         self.bp._bpactive = 2
@@ -68,7 +68,7 @@ class TestBreakAndExec(TestCase):
         self.bp.remove_breakpoint(200)
         self.assertEqual(self.bp._bpactive, 0)
         self.assertEqual(self.bp._bp, {100: {'inuse' : True, 'active': False, 'inflash': False, 'hwbp' : None,
-                                    'opcode': 0x9598, 'secondword' : 0x1111, 'timestamp' : 1 },
+                                    'opcode': BREAKCODE, 'secondword' : 0x1111, 'timestamp' : 1 },
                                        200:  {'inuse' : True, 'active': False, 'inflash': False, 'hwbp' : None,
                                     'opcode': 0x2222, 'secondword' : 0x3333, 'timestamp' : 2 }})
 
@@ -79,7 +79,7 @@ class TestBreakAndExec(TestCase):
         self.bp.mon.is_onlyswbps.return_value = False
         self.bp._bstamp = 6
         self.bp._bp = {100: {'inuse' : True, 'active': True, 'inflash': False, 'hwbp' : None, # will get swbp
-                                 'opcode': 0x9598, 'secondword' : 0x1111, 'timestamp' : 2 },
+                                 'opcode': BREAKCODE, 'secondword' : 0x1111, 'timestamp' : 2 },
                        200:  {'inuse' : True, 'active': False, 'inflash': True, 'hwbp' : None, # will remove swbp
                                   'opcode': 0x2221, 'secondword' : 0x3331, 'timestamp' : 5 },
                        300:  {'inuse' : True, 'active': False, 'inflash': False, 'hwbp' : 1, # will remove hwbp
@@ -88,7 +88,7 @@ class TestBreakAndExec(TestCase):
                                   'opcode': 0x2223, 'secondword' : 0x3333, 'timestamp' : 3 }}
         self.bp.update_breakpoints(0)
         self.assertEqual(self.bp._bp, {100: {'inuse' : True, 'active': True, 'inflash': True, 'hwbp' : None,
-                                    'opcode': 0x9598, 'secondword' : 0x1111, 'timestamp' : 2 },
+                                    'opcode': BREAKCODE, 'secondword' : 0x1111, 'timestamp' : 2 },
                                        400:  {'inuse' : True, 'active': True, 'inflash': False, 'hwbp' : 1,
                                     'opcode': 0x2223, 'secondword' : 0x3333, 'timestamp' : 3 }})
         self.assertEqual(self.bp._hw, [-1, 400 ])
@@ -103,7 +103,7 @@ class TestBreakAndExec(TestCase):
         self.bp._bstamp = 6
         self.bp._bpactive = 3
         self.bp._bp = {100: {'inuse' : True, 'active': True, 'inflash': False, 'hwbp' : 1, # will have to give up hwbp
-                                 'opcode': 0x9598, 'secondword' : 0x1111, 'timestamp' : 1 },
+                                 'opcode': BREAKCODE, 'secondword' : 0x1111, 'timestamp' : 1 },
                        200:  {'inuse' : True, 'active': False, 'inflash': True, 'hwbp' : None, # will remove swbp
                                   'opcode': 0x2221, 'secondword' : 0x3331, 'timestamp' : 2 },
                        300:  {'inuse' : True, 'active': False, 'inflash': True, 'hwbp' : None, # will remove swbp
@@ -114,7 +114,7 @@ class TestBreakAndExec(TestCase):
                                   'opcode': 0x2224, 'secondword' : 0x3334, 'timestamp' : 5 }}
         self.bp.update_breakpoints(0)
         self.assertEqual(self.bp._bp, {100: {'inuse' : True, 'active': True, 'inflash': True, 'hwbp' : None,
-                                    'opcode': 0x9598, 'secondword' : 0x1111, 'timestamp' : 1 },
+                                    'opcode': BREAKCODE, 'secondword' : 0x1111, 'timestamp' : 1 },
                                        400:  {'inuse' : True, 'active': True, 'inflash': True, 'hwbp' : None,
                                     'opcode': 0x2223, 'secondword' : 0x3333, 'timestamp' : 4 },
                                        500:  {'inuse' : True, 'active': True, 'inflash': False, 'hwbp' : 1,
@@ -147,6 +147,22 @@ class TestBreakAndExec(TestCase):
         self.bp._hw[1] = 8888
         self.bp.resume_execution(2224)
         self.bp.dbg.program_counter_write.assert_called_with(1112)
+        self.bp.dbg.run_to.assert_called_with(8888)
+
+    def test_resume_execution_break(self):
+        self.bp.mon.is_onlyswbps.return_value = False
+        self.bp.mon.is_onlyhwbps.return_value = False
+        self.bp._read_flash_word.side_effect = [ BREAKCODE ]
+        self.assertEqual(self.bp.resume_execution(2224), SIGILL)
+        self.bp.dbg.program_counter_write.assert_called_with(1112)
+
+    def test_resume_execution_sleep(self):
+        self.bp.mon.is_onlyswbps.return_value = False
+        self.bp.mon.is_onlyhwbps.return_value = False
+        self.bp._read_flash_word.side_effect = [ SLEEPCODE ]
+        self.bp._hw[1] = 8888
+        self.assertEqual(self.bp.resume_execution(2224), None)
+        self.bp.dbg.program_counter_write.assert_has_calls([call(1112), call(1113)])
         self.bp.dbg.run_to.assert_called_with(8888)
 
     def test_resume_execution_without_hwbp(self):
@@ -184,6 +200,22 @@ class TestBreakAndExec(TestCase):
         self.bp.dbg.step.assert_called_once()
         self.bp.dbg.run_to.assert_not_called()
 
+    def test_single_step_break(self):
+        self.bp.mon.is_safe.return_value = False
+        self.bp.mon.is_onlyswbps.return_value = False
+        self.bp.dbg.program_counter_read.return_value = 22
+        self.bp._read_flash_word.side_effect = [ BREAKCODE ]
+        self.assertEqual(self.bp.single_step(None), SIGILL)
+        self.bp._read_flash_word.assert_called_once()
+
+    def test_single_step_sleep(self):
+        self.bp.mon.is_safe.return_value = False
+        self.bp.mon.is_onlyswbps.return_value = False
+        self.bp.dbg.program_counter_read.return_value = 22
+        self.bp._read_flash_word.side_effect = [ SLEEPCODE ]
+        self.assertEqual(self.bp.single_step(None), SIGTRAP)
+        self.bp._read_flash_word.assert_called_once()
+        self.bp.dbg.program_counter_write.assert_has_calls([call(23)])
 
     def test_single_step_two_word_instr_at_BP_without_start(self):
         self.bp.mon.is_onlyswbps.return_value = False
@@ -203,40 +235,40 @@ class TestBreakAndExec(TestCase):
         self.assertEqual(self.bp.single_step(42), SIGTRAP)
         self.bp.dbg.program_counter_write.assert_called_with(21)
         self.bp.dbg.program_counter_read.assert_not_called()
-        self.bp._read_flash_word.assert_not_called()
+        self.bp._read_flash_word.assert_called_once()
         self.bp.dbg.step.assert_called_once()
         self.bp.dbg.run_to.assert_not_called()
 
     def test_single_step_safe_nobranch_oneWordInstr(self):
         self.bp.mon.is_onlyswbps.return_value = False
         self.bp.dbg.program_counter_read.return_value = 22
-        self.bp._read_flash_word.side_effect = [ 0x8FF4, 0x8FFF ]
+        self.bp._read_flash_word.side_effect = [ 0x8FF4, 0x8FF4, 0x8FFF ]
         self.assertFalse(self.bp.two_word_instr(0x8FF4))
-        self.assertFalse(self.bp.branch_instr(0x9000))
+        self.assertFalse(self.bp.branch_instr(0x8FF4))
         self.assertEqual(self.bp.single_step(None), None)
-        self.bp._read_flash_word.assert_called_once()
+        self.bp._read_flash_word.assert_has_calls([call(44), call(44)], any_order=True )
         self.bp.dbg.step.assert_not_called()
         self.bp.dbg.run_to.assert_called_with(46)
 
     def test_single_step_safe_nobranch_two_word_instr(self):
         self.bp.mon.is_onlyswbps.return_value = False
         self.bp.dbg.program_counter_read.return_value = 22
-        self.bp._read_flash_word.side_effect = [ 0x9000, 0x88FF ]
+        self.bp._read_flash_word.side_effect = [ 0x9000, 0x9000, 0x88FF ]
         self.assertTrue(self.bp.two_word_instr(0x9000))
         self.assertFalse(self.bp.branch_instr(0x9000))
         self.assertEqual(self.bp.single_step(None), None)
         self.bp.dbg.step.assert_not_called()
         self.bp.dbg.run_to.assert_called_with(48)
 
-    def test_single_step_safe_branch_oneWordInstr(self):
+    def test_single_step_safe_branch_one_word_instr(self):
         self.bp.mon.is_onlyswbps.return_value = False
         self.bp.dbg.program_counter_read.return_value = 22
-        self.bp._read_flash_word.side_effect = [ 0x9518, 0x8FFF ]
+        self.bp._read_flash_word.side_effect = [ 0x9518, 0x9518, 0x8FFF ]
         self.assertFalse(self.bp.two_word_instr(0x9518))
         self.assertTrue(self.bp.branch_instr(0x9518))
         self.bp.dbg.status_register_read.side_effect = [ bytearray([0x88]), bytearray([0x07]) ]
         self.assertEqual(self.bp.single_step(None), SIGTRAP)
-        self.bp._read_flash_word.assert_called_once()
+        self.bp._read_flash_word.assert_has_calls([call(44), call(44)], any_order=True)
         self.bp.dbg.status_register_write.assert_has_calls([ call(bytearray([0x08])), call(bytearray([0x87])) ])
         self.assertEqual(self.bp.dbg.status_register_read.call_count, 2)
         self.bp.dbg.step.assert_called_once()
@@ -245,12 +277,12 @@ class TestBreakAndExec(TestCase):
     def test_single_step_safe_branch_two_word_instr(self):
         self.bp.mon.is_onlyswbps.return_value = False
         self.bp.dbg.program_counter_read.return_value = 22
-        self.bp._read_flash_word.side_effect = [ 0x950C, 0x8FFF ]
+        self.bp._read_flash_word.side_effect = [ 0x950C, 0x950C, 0x8FFF ]
         self.assertTrue(self.bp.two_word_instr(0x950C))
         self.assertTrue(self.bp.branch_instr(0x950C))
         self.bp.dbg.status_register_read.side_effect = [ bytearray([0x88]), bytearray([0x07]) ]
         self.assertEqual(self.bp.single_step(None), 5)
-        self.bp._read_flash_word.assert_called_once()
+        self.bp._read_flash_word.assert_has_calls([call(44), call(44)], any_order=True)
         self.bp.dbg.status_register_write.assert_has_calls([ call(bytearray([0x08])), call(bytearray([0x87])) ])
         self.assertEqual(self.bp.dbg.status_register_read.call_count, 2)
         self.bp.dbg.step.assert_called_once()
@@ -259,11 +291,11 @@ class TestBreakAndExec(TestCase):
     def test_single_step_safe_brie(self):
         self.bp.mon.is_onlyswbps.return_value = False
         self.bp.dbg.program_counter_read.return_value = 22
-        self.bp._read_flash_word.side_effect = [ 0xF017 ]
+        self.bp._read_flash_word.side_effect = [ 0xF017, 0xF017 ]
         self.assertTrue(self.bp.branch_on_ibit(0xF017)) # BRIE .+2
         self.bp.dbg.status_register_read.side_effect = [ bytearray([0x88]) ]
         self.assertEqual(self.bp.single_step(None), None)
-        self.bp._read_flash_word.assert_called_once()
+        self.bp._read_flash_word.assert_has_calls([call(44), call(44)], any_order=True)
         self.assertEqual(self.bp.dbg.status_register_read.call_count, 1)
         self.bp.dbg.step.assert_not_called()
         self.bp.dbg.run_to.assert_called_with(50)
@@ -277,7 +309,7 @@ class TestBreakAndExec(TestCase):
         self.bp.dbg.step.assert_called_once()
         self.bp.dbg.run.assert_not_called()
         self.bp.dbg.run_to.assert_not_called()
-        self.bp._read_flash_word.assert_not_called()
+        self.bp._read_flash_word.assert_called_once()
 
     def test_range_step_impossible_odd(self):
         self.bp.mon.is_old_exec.return_value = False
@@ -306,10 +338,39 @@ class TestBreakAndExec(TestCase):
         self.bp.dbg.run.assert_not_called()
         self.bp.dbg.run_to.assert_not_called()
 
+    def test_range_step_break(self):
+        self.bp.mon.is_old_exec.return_value = False
+        self.bp.mon.is_range.return_value = True
+        self.bp.mon.is_onlyhwbps.return_value = False
+        self.bp.mon.is_onlyswbps.return_value = False
+        self.bp.insert_breakpoint(100)
+        self.bp.dbg.program_counter_read.return_value = 10
+        code = [ BREAKCODE, 0xef2f, 0xee81, 0xe094, BREAKCODE ]
+        self.bp._read_flash_word.side_effect = code
+        self.assertEqual(self.bp.range_step(10,16), SIGILL)
+        self.bp.dbg.step.assert_not_called()
+        self.bp.dbg.run.assert_not_called()
+        self.bp.dbg.run_to.assert_not_called()
+
+    def test_range_step_sleep(self):
+        self.bp.mon.is_old_exec.return_value = False
+        self.bp.mon.is_range.return_value = True
+        self.bp.mon.is_onlyhwbps.return_value = False
+        self.bp.mon.is_onlyswbps.return_value = False
+        self.bp.insert_breakpoint(100)
+        self.bp.dbg.program_counter_read.return_value = 10
+        code = [ SLEEPCODE, 0xef2f, 0xee81, 0xe094, SLEEPCODE ]
+        self.bp._read_flash_word.side_effect = code
+        self.assertEqual(self.bp.range_step(10,16), SIGTRAP)
+        self.bp.dbg.program_counter_write.assert_called_with(11)
+        self.bp.dbg.step.assert_not_called()
+        self.bp.dbg.run.assert_not_called()
+        self.bp.dbg.run_to.assert_not_called()
+
     def test_range_step_race_to_branch(self):
         self.bp.mon.is_onlyswbps.return_value = False
         # while (++i) { if ( i < 0 ) return(i); }
-        code = [ 0x2f98, 0x5f8f, 0xf011, 0xf7e2, 0x9508, 0xe083,  ]
+        code = [ 0x2f98, 0x5f8f, 0xf011, 0xf7e2, 0x9508, 0xe083, 0x2f98, ]
         self.bp._read_flash_word.side_effect = code
         start = 0x033a
         end = 0x0344
