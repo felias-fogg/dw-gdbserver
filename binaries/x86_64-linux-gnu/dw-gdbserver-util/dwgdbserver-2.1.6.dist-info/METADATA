@@ -1,6 +1,6 @@
 Metadata-Version: 2.3
 Name: dwgdbserver
-Version: 2.1.5
+Version: 2.1.6
 Summary: A gdbserver for debugWIRE
 License: MIT
 Author: Bernhard Nebel
