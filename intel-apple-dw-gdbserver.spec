@@ -12,7 +12,7 @@ a = Analysis(
     binaries=[
         ('/usr/local/Cellar/libusb/1.0.28/lib/libusb-1.0.0.dylib','.'),
         ('/usr/local/Cellar/libusb/1.0.28/lib/libusb-1.0.a', '.'),
-        ('/usr/local/xsCellar/libusb/1.0.28/lib/libusb-1.0.dylib', '.')],
+        ('/usr/local/Cellar/libusb/1.0.28/lib/libusb-1.0.dylib', '.')],
     datas=[],
     hiddenimports=hiddenimports,
     hookspath=[],
