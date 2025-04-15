@@ -1,8 +1,12 @@
 # Changelog
 
+V2.1.7 (15-Apr-2025)
+
+- Added: More info logs when using automatic switching to debugWIRE mode
+
 ### V2.1.6 (14-Apr-2015)
 
-- Fixed: Since multiple -c options are possible, applying the strip method does not work. Instead, we deal with the single command now.
+- Fixed: Since multiple -c options are possible, applying the strip method does not work. Instead, we deal with the single relevant command now.
 
 ### V2.1.5 (13-Apr-2025)
 

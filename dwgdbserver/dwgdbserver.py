@@ -417,14 +417,15 @@ class GdbHandler():
     def send_power_cycle(self):
         """
         This is a call back function that will try to power-cycle
-        automagically. If unsuccessful, it will ask user to power-cycle.
+        automagically. If successful, it will return True.
+        Otherwise, it will ask user to power-cycle and return False.
         """
         if self.dbg.transport.device.product_string.lower().startswith('medbg'):
             # mEDBG are the only ones it will work with, I believe.
             # I tried to use a try/except construction,
             # but this confuses the debugger and it is stuck
             # in an illegal state (the housekeeper does not respond)
-            self.logger.debug("Try automatic power-cycling")
+            self.logger.info("Try automatic power-cycling")
             self.dbg.edbg_protocol.set_byte(EdbgProtocol.EDBG_CTXT_CONTROL,
                                                 EdbgProtocol.EDBG_CONTROL_TARGET_POWER,
                                                 0)
