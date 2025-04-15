@@ -36,24 +36,16 @@ It will be necessary to install [pipx](https://pipx.pypa.io/) first. If you have
 
 After unplugging and replugging the debugger and restarting your shell, you can invoke the gdbserver by simply typing `dw-gdbserver` into a shell. The binary is stored under `~/.local/bin/`
 
-#### macOS
+#### macOS and Windows
 
 ```
 > pipx install dwgdbserver
 > pipx ensurepath
-> brew install libusb
 ```
 
 After restarting the shell, you should be able to start the gdbserver. The binary is stored under `~/.local/bin/`
 
-#### Windows
 
-```
-> pipx install dwgdbserver
-> pipx ensurepath
-```
-
-Again, you need to restart the shell, and then you can type in `dw-gdbserver.exe` when you want to start the gdbserver. The binary is stored under `~/.local/bin/`
 
 ### GitHub installation
 
@@ -76,7 +68,7 @@ Furthermore, you can create a binary standalone package as follows:
 > poetry run pyinstaller dw-gdbserver.spec
 ```
 
-After that, you find an executable `dw-gdbserver` (or `dw-gdbserver.exe`) in the directory `dist/dw-gdbserver/` together with the folder `dw-gdbserver-util`. You can copy those to a place in your `PATH`.
+After that, you find an executable `dw-gdbserver` (or `dw-gdbserver.exe`) in the directory `dist/dw-gdbserver/` together with the folder `dw-gdbserver-util`. You can copy those to a place in your `PATH`. If you want to generate a binary on a Mac that can be shipped to other Macs, you should use `arm64-apple-dw-gdbserver.spec` or `intel-apple-dw-gdbserver.spec` in order to include `libusb`.
 
 ## Usage
 

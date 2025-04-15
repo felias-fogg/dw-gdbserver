@@ -1,5 +1,9 @@
 # Changelog
 
+### V2.1.8 (15-Apr-2025)
+
+- Fixed: For Intel and Apple Silicon Macs, libusb is now bundled in the binary so that the user does not have to deal with the nuisance of providing the right libusb (which is actually not trivial when on an Apple Silicon Mac you have a Rosetta homebrew installation).
+
 ### V2.1.7 (15-Apr-2025)
 
 - Added: More info logs when using automatic switching to debugWIRE mode
