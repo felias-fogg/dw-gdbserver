@@ -1,6 +1,6 @@
 # Changelog
 
-V2.1.7 (15-Apr-2025)
+### V2.1.7 (15-Apr-2025)
 
 - Added: More info logs when using automatic switching to debugWIRE mode
 
