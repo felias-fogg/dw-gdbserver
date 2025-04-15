@@ -1,8 +1,8 @@
 #!/bin/bash
-arch=XXX
+arch=x86_64-mingw32
+git pull
 poetry install
-poetry run pyinstaller --noconfirm dw-gdbserver.spec
-rm -rf binaries/${arch}/dw-gdbserver*
-mv dist/dw-gdbserver/dw-gdbserver* binaries/${arch}/
-git add binaries/${arch}/
-git commit -a -m "${arch} binaries - `./binaries/${arch}/dw-gdbserver -V`"
+poetry run pyinstaller -y dw-gdbserver.spec
+ssh nebel@macmini.fogg rm -rf /Users/nebel/Github/felias-fogg.github.io/binaries/${arch}/dw-gdb*
+scp -r dist/dw-gdbserver/dw-gdbserver* nebel@macmini.fogg:/Users/nebel/Github/felias-fogg.github.io/binaries/${arch}/
+./dist/dw-gdbserver/dw-gdbserver -V
