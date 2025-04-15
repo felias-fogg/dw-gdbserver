@@ -1,5 +1,5 @@
 #!/bin/bash
-arch=x86_64-mingw32
+arch=XXX
 git pull
 poetry install
 poetry run pyinstaller -y dw-gdbserver.spec
