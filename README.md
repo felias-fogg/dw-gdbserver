@@ -18,7 +18,13 @@ In both cases, you can check whether you were successful by typing the same comm
 
 ## Installation
 
-If you want to use dw-gdbserver as part of Arduino IDE 2, you do not need to install it explicitly. It is enough [to add an "additional boards manager URL" and install the respective core](#Arduino-IDE-2).
+If you want to use dw-gdbserver as part of Arduino IDE 2, you do not need to install it explicitly. It is enough [to add an "additional boards manager URL" and install the respective core](#Arduino-IDE-2). As a Linux user, you may have to set additionally some permissions.
+
+### Installation by downloading binaries
+
+Go to the GitHub page (if you are not already there), select the latest release (right-hand side of page), download the archive with the binary for your architecture, and untar the archive. It contains the executable `dw-gdbserver` and a folder `dw-gdbserver-util`. Store both of them somewhere in the same folder and include this folder in your `PATH` variable.
+
+Since the binaries were generated on very recent versions of the respective operating systems (Windows 11, MacOS 15.4, Ubuntu 24.04), it can happen that the binary is not compatible with your operating system. In this case, you can use one oft the methods below.
 
 ### PyPI installation
 
@@ -45,11 +51,9 @@ After unplugging and replugging the debugger and restarting your shell, you can 
 
 After restarting the shell, you should be able to start the gdbserver. The binary is stored under `~/.local/bin/`
 
-
-
 ### GitHub installation
 
-Alternatively, you can download/clone the GitHub repository. You need then to install the package poetry:
+Alternatively, you can download or clone the GitHub repository. You need then to install the package poetry:
 
 ```
 > pipx install poetry
