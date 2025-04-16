@@ -1,5 +1,9 @@
 # Changelog
 
+### V2.1.8-post1 (16-Feb-2025)
+
+- Fixed: Pictures in the readme file are embedded using absolute URLs because PyPI cannot deal with relative ones (since it does not upload the entire GitHub repo).
+
 ### V2.1.8 (15-Apr-2025)
 
 - Fixed: For Intel and Apple Silicon Macs, libusb is now bundled in the binary so that the user does not have to deal with the nuisance of providing the right libusb (which is actually not trivial when on an Apple Silicon Mac you have a Rosetta homebrew installation).

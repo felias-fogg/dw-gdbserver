@@ -1,6 +1,6 @@
 [project]
 name = "dwgdbserver"
-version = "2.1.8"
+version = "2.1.8-post1"
 description = "A gdbserver for debugWIRE"
 authors = [
     {name = "Bernhard Nebel",email = "nebel@arduino-craft-corner.de"}

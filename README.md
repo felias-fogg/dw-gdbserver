@@ -167,7 +167,7 @@ In principle, only two lines are necessary to connect your hardware debugger to 
 
 There are two types of SPI programming connectors. The more recent type has six pins, and the older type has 10 pins, as shown in the following diagram (based on a diagram from Wikipedia https://commons.wikimedia.org/wiki/user:Osiixy), which provides a top view of the headers on a PCB.
 
-![ISP headers](docs/pics/Isp_headers.svg.png)
+![ISP headers](https://raw.githubusercontent.com/felias-fogg/dw-gdbserver/refs/heads/main/docs/pics/Isp_headers.svg.png)
 
 Note the notches on the left side of the headers. Since almost all SPI programming plugs are keyed, you can only plug them in in the correct orientation. However, the headers sometimes do not have notches. In this case, pin 1 is usually marked in some way, either with a dot, a star, or with the number 1. Similarly, plugs also come unkeyed. In this case, again, pin 1 is marked in some way.
 
@@ -175,7 +175,7 @@ Note the notches on the left side of the headers. Since almost all SPI programmi
 
 If the target board has an SPI programming header, it is easy to connect to it. **Atmel-ICE**, **Power Debugge**r, and **JTAGICE3** have a cable you can plug into a 6-pin SPI programming header. If you only have a 10-pin header on the target, you need an adapter. **PICKit4** and **SNAP** do not come with SPI programming headers. However, you can buy an [AVR programming adapter](https://www.microchip.com/en-us/development-tool/ac31s18a) from Microchip, an [adapter PCB from OSH Park](https://oshpark.com/shared_projects/eZiws6Jb), or [a more luxurious version from eBay](https://www.ebay.de/itm/186561251300). Finally, for **dw-link**, I propose preparing a [modified SPI programming cable](https://arduino-craft-corner.de/index.php/2022/01/13/a-debugwire-hardware-debugger-for-less-than-10-e/) or buying the [dw-link probe programmer shield](https://www.tindie.com/products/fogg/dw-link-probe-a-debugwire-hardware-debugger/), which has an SPI programming header on board.
 
-![atmel-ice-connect](docs/pics/atmel-ice-connect.png)
+![atmel-ice-connect](https://raw.githubusercontent.com/felias-fogg/dw-gdbserver/refs/heads/main/docs/pics/atmel-ice-connect.png)
 
 When using one of the commercial debuggers, you need to power the target board from an external source. With dw-link, you can choose to power the target board from the debugger or an external source.
 
@@ -209,7 +209,7 @@ For **PICkit4** and **SNAP**, such a table looks as follows, with pin 1 marked b
 | Pin 7 (TTDI)   | 7     | MOSI       | 4       |
 | Pin 8 (TTMS)   | 8     | &nbsp;     | &nbsp;  |
 
-![picki4-connect](docs/pics/pickit4-connect.png)
+![picki4-connect](https://raw.githubusercontent.com/felias-fogg/dw-gdbserver/refs/heads/main/docs/pics/pickit4-connect.png)
 
 When you want to connect a **dw-link** debugger without a dw-link probe shield to a target, you can use jumper cables using the following pin mapping.
 
@@ -283,15 +283,17 @@ board_hardware.oscillator = external
 
 Note that the debug environment should be the default one. It should be the first if no default environment has been declared.
 
+I further noticed that the avr-gdb debugger in the PlatformIO toolchain is quite dated and often does not start (e.g. under Ubuntu 24.04). Simply replace it with a more recent version from /ust/bin or /usr/local/bin.
+
 ### Gede
 
 [Gede](https://github.com/jhn98032/gede) is a lean and clean GUI for GDB. It can be built and run on almost all Linux distros, FreeBSD, and macOS. You need an avr-gdb client with a version >= 10.2. If you have installed Gede somewhere in your PATH, you can start it by specifying the option `--gede` or `-g` when starting dw-gdbserver.
 
-![Gede](docs/pics/gede.png)
+![Gede](https://raw.githubusercontent.com/felias-fogg/dw-gdbserver/refs/heads/main/docs/pics/gede.png)
 
 `Project dir` and `Program` are specific to your debugging session. The rest should be copied as it is shown. Before you click `OK`, you should switch to the `Commands` section, where you need to enter the command `monitor debugwire enable`.
 
-![Command section](docs/pics/gede-cmds.png)
+![Command section](https://raw.githubusercontent.com/felias-fogg/dw-gdbserver/refs/heads/main/docs/pics/gede-cmds.png)
 
 Clicking on OK, you start a debugging session. The startup may take a while because the debugger always loads the object file into memory.
 

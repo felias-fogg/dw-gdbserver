@@ -2,6 +2,7 @@
 arch=XXX
 git pull
 poetry install
+rm -rf build
 poetry run pyinstaller -y dw-gdbserver.spec
 ssh nebel@macmini.fogg rm -rf /Users/nebel/Github/felias-fogg.github.io/binaries/${arch}/dw-gdb*
 scp -r dist/dw-gdbserver/dw-gdbserver* nebel@macmini.fogg:/Users/nebel/Github/felias-fogg.github.io/binaries/${arch}/
