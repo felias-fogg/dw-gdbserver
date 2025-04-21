@@ -226,17 +226,17 @@ When you want to connect a **dw-link** debugger without a dw-link probe shield t
 
 ## Integrated Development Environments and Graphical User Interfaces
 
-There are several possible options for using an IDE or a GUI that make use dw-gdbserver to enable a debugging solution.
+There are several possible options for using an IDE or a GUI that make use of dw-gdbserver to enable a debugging solution.
 
 ### Arduino IDE 2
 
-Arduino IDE 2 is probably the most straightforward option. You only need to add an `Additional Boards Manager URL` in the `Preference` dialog. Currently, only [MiniCore](https://github.com/MCUdude/MiniCore) is supported, and you need to add the following line:
+Arduino IDE 2 is probably the most straightforward option. You only need to add `Additional Boards Manager URL` in the `Preference` dialog:
 
 ```
-https://felias-fogg.github.io/MiniCore/package_MCUdude_MiniCore_index.json
+https://felias-fogg.github.io/ATTinyCore/package_drazzy.com_ATTinyCore_index.json
 ```
 
-After that, you must install the [MiniCore](https://github.com/MCUdude/MiniCore) package, which enables you to debug all ATmegaX8(P)(B) MCUs. And this is all! Now, you can press the debug button and start debugging. See, e.g., this [short tutorial](https://docs.arduino.cc/software/ide-v2/tutorials/ide-v2-debugger/) about debugging in the Arduino IDE 2
+After that, you must install the respective cores, which enables you to debug almost all classic AVR chips (MiniCore and MicroCore will come soon!). And this is all! Now, you can press the debug button and start debugging. See, e.g., this [short tutorial](https://docs.arduino.cc/software/ide-v2/tutorials/ide-v2-debugger/) about debugging in the Arduino IDE 2
 
 Linux users may need to add a few udev rules. When you first start the Arduino IDE debugger and the hardware debuggers are not recognized, you will get a hint in the `gdb-server` window of how to set the udev rules. You simply have to execute dw-gdbserver once using the command line option `--install-udev-rules`.
 
