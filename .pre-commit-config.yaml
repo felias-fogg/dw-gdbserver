@@ -11,7 +11,7 @@ repos:
   hooks:
   - id: codespell
     name: codespell
-    args: [ "--exclude-file=tests/util/all.lst,poetry.lock", "-L ser, RCALL, datas" ]
+    args: [ "--exclude-file=tests/util/all.lst,poetry.lock", "-L ser, RCALL, datas, rcall" ]
 - repo: local
   hooks:
   - id: pylint
@@ -41,3 +41,4 @@ repos:
     additional_dependencies:
       - pyedbglib
       - pymcuprog
+      - pyusb

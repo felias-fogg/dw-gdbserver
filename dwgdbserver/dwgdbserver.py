@@ -39,6 +39,7 @@ from pymcuprog.utils import read_target_voltage
 from pymcuprog.pymcuprog_errors import PymcuprogNotSupportedError, PymcuprogError
 
 from dwgdbserver import dwlink
+from dwgdbserver.livetests import LiveTests
 from dwgdbserver.xavrdebugger import XAvrDebugger
 from dwgdbserver.deviceinfo.devices.alldevices import dev_id, dev_name
 
@@ -88,8 +89,7 @@ class GdbHandler():
         self._extended_remote_mode = False
         self._vflashdone = False # set to True after vFlashDone received
         self._connection_error = None
-
-
+        self._live_tests = LiveTests(self)
         self.packettypes = {
             '!'           : self._extended_remote_handler,
             '?'           : self._stop_reason_handler,
@@ -319,12 +319,11 @@ class GdbHandler():
             pc_byte_string = binascii.hexlify((pc).to_bytes(4,byteorder='little')).decode('ascii')
             self.send_packet(pc_byte_string)
         elif packet == "21": # SP
-            sp_byte_string = (binascii.hexlify(self.dbg.stack_pointer_read())).decode('ascii')
+            sp_byte_string = "%02X%02X" % tuple(self.dbg.stack_pointer_read())
             self.logger.debug("RSP packet: read SP command (little endian): 0x%s", sp_byte_string)
             self.send_packet(sp_byte_string)
         elif packet == "20": # SREG
-            sreg_byte_string =  (binascii.hexlify(self.dbg.status_register_read())).\
-                                    decode('ascii')
+            sreg_byte_string =  "%02X" % self.dbg.status_register_read()[0]
             self.logger.debug("RSP packet: read SREG command: 0x%s", sreg_byte_string)
             self.send_packet(sreg_byte_string)
         else:
@@ -404,6 +403,8 @@ class GdbHandler():
                 self.logger.info("Commands: %s", resp)
             elif 'info' in response[0]:
                 response = ("", response[1].format(dev_name[self.dbg.device_info['device_id']]))
+            elif 'live_tests' in response[0]:
+                self._live_tests.run_tests()
         except AvrIspProtocolError as e:
             self.logger.critical("ISP programming failed: %s", e)
             self.send_reply_packet("ISP programming failed: %s" % e)
@@ -987,10 +988,12 @@ class Memory():
         """
         Store chunks into the flash cache. Programming will take place later.
         """
+        self.logger.debug("store_to_cache at %X", addr)
         if addr < len(self._flash):
             raise FatalError("Overlapping  flash areas at 0x%X" % addr)
         self._flash.extend(bytearray([0xFF]*(addr - len(self._flash) )))
         self._flash.extend(data)
+        self.logger.debug("%s", self._flash)
 
     def flash_pages(self):
         """
@@ -1011,6 +1014,8 @@ class Memory():
                 for p in range(self._multi_buffer):
                     currentpage += self.dbg.flash_read(pgaddr+(p*self._flash_page_size),
                                                            self._flash_page_size)
+            self.logger.debug("pagetoflash: %s", pagetoflash.hex())
+            self.logger.debug("currentpage: %s", currentpage.hex())
             if currentpage[:len(pagetoflash)] == pagetoflash:
                 self.logger.debug("Skip flashing page because already flashed at 0x%X", pgaddr)
             else:
@@ -1028,8 +1033,8 @@ class Memory():
                     for p in range(self._multi_buffer):
                         readbackpage += self.dbg.flash_read(pgaddr+(p*self._flash_page_size),
                                                                      self._flash_page_size)
-                    #self.logger.debug("pagetoflash: %s", pagetoflash.hex())
-                    #self.logger.debug("readback: %s", readbackpage.hex())
+                    self.logger.debug("pagetoflash: %s", pagetoflash.hex())
+                    self.logger.debug("readback: %s", readbackpage.hex())
                     if readbackpage != pagetoflash:
                         raise FatalError("Flash verification error on page 0x{:X}".format(pgaddr))
             pgaddr += self._multi_page_size
@@ -1641,7 +1646,26 @@ class MonitorCommand():
             'NoXML'        : self._mon_no_xml,
             'OldExecution' : self._mon_old_execution,
             'Target'       : self._mon_target,
+            'LiveTests'    : self._mon_live_tests,
             }
+
+    def set_default_state(self):
+        """
+        Set state variables to default values.
+        """
+        self._noload = False
+        self._onlyhwbps = False
+        self._onlyswbps = False
+        self._fastload = True
+        self._cache = True
+        self._safe = True
+        self._verify = True
+        self._timersfreeze = True
+        self._noxml = False
+        self._power = True
+        self._old_exec = False
+        self._range = True
+
 
     def is_onlyhwbps(self):
         """
@@ -1955,6 +1979,7 @@ Single-stepping:          """ + ("safe" if self._safe else "interruptible"))
     def _mon_version(self, _):
         return("", "dw-gdbserver {}".format(importlib.metadata.version("dwgdbserver")))
 
+    # The following commands are for internal purposes
     def _mon_no_xml(self, _):
         self._noxml = True
         return("", "XML disabled")
@@ -1980,6 +2005,11 @@ Single-stepping:          """ + ("safe" if self._safe else "interruptible"))
         else:
             return self._mon_unknown(tokens[0])
         return res
+
+    def _mon_live_tests(self, _):
+        if self._dw_mode_active:
+            return("live_tests", "Tests done")
+        return("", "Enable debugWIRE mode before starting a live test run")
 
 class DebugWIRE():
     """

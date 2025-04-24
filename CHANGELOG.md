@@ -1,6 +1,16 @@
 # Changelog
 
-### V2.1.8-post1 (16-Feb-2025)
+### V2.2.0-pre1 (24-Apr-2025)
+
+- Added: Live tests for: 'X', C', 'g', 'G', 'm', 'M', 'p', and 'P' packages
+- Fixed: p20 (SREG) led to a typing error
+- Fixed: p21 (SP) led to a typing error
+
+### V2.1.8-post2 (21-Apr-2025)
+
+- Readme file changed concerning which core files are available
+
+### V2.1.8-post1 (16-Apr-2025)
 
 - Fixed: Pictures in the readme file are embedded using absolute URLs because PyPI cannot deal with relative ones (since it does not upload the entire GitHub repo).
 
