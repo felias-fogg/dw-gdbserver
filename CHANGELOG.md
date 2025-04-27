@@ -1,5 +1,9 @@
 # Changelog
 
+### V2.0.0-pre2 (27-Apr-2025)
+
+- Added: Live test for 'S' packet
+
 ### V2.2.0-pre1 (24-Apr-2025)
 
 - Added: Live tests for: 'X', C', 'g', 'G', 'm', 'M', 'p', and 'P' packages

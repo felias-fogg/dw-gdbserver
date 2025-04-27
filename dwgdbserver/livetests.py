@@ -76,7 +76,7 @@ class LiveTests():
         self.mon.set_default_state()
         self.success = 0
         self.failure = 0
-        self.tests_total = 19
+        self.tests_total = 20
         try:
             self.handler.send_debug_message("Running live tests ...")
             self.logger.info("Starting live tests (will clobber SRAM and flash)")
@@ -100,6 +100,7 @@ class LiveTests():
             self._live_test_set_sreg()
             self._live_test_set_sp()
             self._live_test_set_pc()
+            self._live_test_step()
         except Exception as e: #pylint: disable=broad-exception-caught
             self.failure += 1
             self.logger.info("... failed")
@@ -113,7 +114,10 @@ class LiveTests():
             self.logger.info("Tests skipped:   %s", self.tests_total -
                                  self.success - self.failure)
             self.handler.send_packet = self.backup_send_packet
-            self.handler.send_debug_message("... live tests finished.")
+            if self.success == self.tests_total:
+                self.handler.send_debug_message("... live tests successfully finished.")
+            else:
+                self.handler.send_debug_message("... live tests finished with some failures.")
 
     def check_result(self, success_condition):
         """
@@ -351,3 +355,29 @@ class LiveTests():
 
     # qAttached, qOffsets, qRcmd, qSupported, qThreadInfo, qsThreadInfo, qXfer:memory-map:read
     # covered by unit tests
+
+    def _live_test_step(self):
+        """
+        Tests 'step' function
+        """
+        self.logger.info("Running 'step' test ...")
+        self.dbg.sram_write(self.sram_start, bytearray([0]))
+        self.dbg.sram_write(16, bytearray([0,0,0,0]))
+        self.logger.debug("PC=%0X", self.dbg.program_counter_read() << 1)
+        self.logger.debug("regs=%s", self.dbg.sram_read(16, 3))
+        self.logger.debug("mem=%s", self.dbg.sram_read(self.sram_start, 1))
+        self.handler.dispatch('S', b'05;01b2')
+        self.logger.debug("Sending: %s", self.send_string)
+        self.handler.dispatch('s', b'')
+        self.logger.debug("Sending: %s", self.send_string)
+        self.handler.dispatch('s', b'')
+        self.logger.debug("Sending: %s", self.send_string)
+        self.logger.debug("PC=%0X", self.dbg.program_counter_read() << 1)
+        self.logger.debug("regs=%s", self.dbg.sram_read(16, 3))
+        self.logger.debug("mem=%s", self.dbg.sram_read(self.sram_start, 1))
+        self.check_result(self.dbg.program_counter_read() << 1 == 0x1BC and
+                              self.dbg.sram_read(16, 3) == bytearray([73, 0, 73]) and
+                              self.dbg.sram_read(self.sram_start, 1) == bytearray([73]))
+
+    # T-package and vCont;? is covered by unit test
+    # vCont;c, vCont;C, vCont;s, vCont;S covered already above
