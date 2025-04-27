@@ -510,7 +510,7 @@ class GdbHandler():
         newpc = None
         if packet:
             newpc = int(packet,16)
-            self.logger.debug("Set PC to 0x%s before single step",newpc)
+            self.logger.debug("Set PC to 0x%X before single step",newpc)
         sig = self.bp.single_step(newpc)
         if sig == SIGABRT:
             self.send_debug_message("Too many breakpoints set")

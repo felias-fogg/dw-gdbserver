@@ -1,9 +1,11 @@
 # Changelog
 
-### V2.2.0-pre2 (26-Apr-2025)
+### V2.2.0-pre3 (27-Apr-2025)
 
 - Added 'reset' in `monitor debugwire enable` command when debugWIRE mode was already enabled. This means we can use this command as a 'reset' command in CLion.
+### V2.0.0-pre2 (27-Apr-2025)
 
+- Added: Live test for 'S' packet
 ### V2.2.0-pre1 (24-Apr-2025)
 
 - Added: Live tests for: 'X', C', 'g', 'G', 'm', 'M', 'p', and 'P' packages
