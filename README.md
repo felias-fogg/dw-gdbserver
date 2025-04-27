@@ -1,8 +1,43 @@
 #  dw-gdbserver
 
-This Python script acts as a [gdbserver](https://sourceware.org/gdb/current/onlinedocs/gdb.html/Server.html#Server) for [*debugWIRE*](https://debugwire.de) MCUs, such as the ATmega328P.  It can communicate with Microchip debuggers such as [Atmel-ICE](https://www.microchip.com/en-us/development-tool/atatmel-ice) and [MPLAB SNAP](https://www.microchip.com/en-us/development-tool/pg164100) (in AVR mode), and it provides a pass-through service for the DIY hardware debugger [dw-link](https://github.com/felias-fogg/dw-link). For Microchip debuggers, it uses the infrastructure provided by [pymcuprog](https://github.com/microchip-pic-avr-tools/pymcuprog) and [pyedgblib](https://github.com/microchip-pic-avr-tools/pyedbglib) to implement a full-blown gdbserver. With dw-gdbserver, you can utilize the built-in symbolic debuggers of IDEs such as Arduino IDE 2 or PlatformIO.
+This Python script acts as a [gdbserver](https://sourceware.org/gdb/current/onlinedocs/gdb.html/Server.html#Server) for [*debugWIRE*](https://debugwire.de) MCUs, e.g., for the ATmega328P.  It can communicate with Microchip debuggers such as [Atmel-ICE](https://www.microchip.com/en-us/development-tool/atatmel-ice) and [MPLAB SNAP](https://www.microchip.com/en-us/development-tool/pg164100) (in AVR mode), and it provides a pass-through service for the DIY hardware debugger [dw-link](https://github.com/felias-fogg/dw-link). For Microchip debuggers, the Python script uses the infrastructure provided by [pymcuprog](https://github.com/microchip-pic-avr-tools/pymcuprog) and [pyedgblib](https://github.com/microchip-pic-avr-tools/pyedbglib) to implement a full-blown gdbserver. With dw-gdbserver, you can utilize the GDB debuggers integrated into IDEs such as Arduino IDE 2 or PlatformIO.
 
-By the way, switching to AVR mode in the SNAP debugger is easily accomplished by using avrdude (>= Version 7.3):
+- [dw-gdbserver](#dw-gdbserver)
+  * [Switching SNAP and PICkit4 to AVR mode](#switching-snap-and-pickit4-to-avr-mode)
+  * [Installation](#installation)
+    + [Installation by downloading binaries](#installation-by-downloading-binaries)
+    + [PyPI installation](#pypi-installation)
+      - [Linux](#linux)
+      - [macOS and Windows](#macos-and-windows)
+    + [GitHub installation](#github-installation)
+  * [Usage](#usage)
+  * [Command line options](#command-line-options)
+  * [How to get into and out of debugWIRE mode](#how-to-get-into-and-out-of-debugwire-mode)
+  * [Monitor commands](#monitor-commands)
+  * [Connecting a debugWIRE Debugger to a Target](#connecting-a-debugwire-debugger-to-a-target)
+    + [SPI programming header](#spi-programming-header)
+    + [Connecting to targets with an SPI programming header](#connecting-to-targets-with-an-spi-programming-header)
+    + [Connecting to targets without an SPI programming header](#connecting-to-targets-without-an-spi-programming-header)
+    + [Powering the target board](#powering-the-target-board)
+  * [Integrated Development Environments and Graphical User Interfaces](#integrated-development-environments-and-graphical-user-interfaces)
+    + [Arduino IDE 2](#arduino-ide-2)
+    + [PlatformIO and Visual Studio Code](#platformio-and-visual-studio-code)
+    + [Gede](#gede)
+  * [List of supported and tested hardware debuggers](#list-of-supported-and-tested-hardware-debuggers)
+  * [List of supported and tested MCUs](#list-of-supported-and-tested-mcus)
+      - [ATtiny (covered by MicroCore):](#attiny--covered-by-microcore--)
+      - [ATtinys (covered by the ATTinyCore):](#attinys--covered-by-the-attinycore--)
+      - [ATmegas (covered by MiniCore):](#atmegas--covered-by-minicore--)
+      - [Other ATmegas:](#other-atmegas-)
+  * [Notes for Linux systems](#notes-for-linux-systems)
+  * [What the future has in store for us](#what-the-future-has-in-store-for-us)
+
+<small><i><a href='http://ecotrust-canada.github.io/markdown-toc/'>Table of contents generated with markdown-toc</a></i></small>
+
+
+## Switching SNAP and PICkit4 to AVR mode
+
+Switching to AVR mode in the SNAP debugger is easily accomplished by using avrdude (>= Version 7.3):
 
 ```
 > avrdude -c snap_isp -Pusb -xmode=avr
@@ -145,7 +180,7 @@ In addition to the above mentioned command for enabling debugWIRE mode, there ar
 | ----------------------------------------------------- | ------------------------------------------------------------ |
 | `monitor breakpoints` [`all`\|`software`\|`hardware`] | Restricts the kind of breakpoints the hardware debugger can use. Either *all* types are permitted, only *software* breakpoints are allowed, or only *hardware* breakpoints can be used. Using all kinds is the default. |
 | `monitor caching` [`enable`\|`disable`]               | The loaded executable is used as a cache in the gdbserver when *enabled*, which is the default. |
-| `monitor debugwire` [`enable`\|`disable`]             | DebugWIRE mode will be enabled or disabled. When enabling it, you may be asked to power-cycle the target. After disabling debugWIRE mode, the MCU can be programmed again using SPI programming. |
+| `monitor debugwire` [`enable`\|`disable`]             | DebugWIRE mode will be enabled or disabled. When enabling it, the MCU will be reset and you may be asked to power-cycle the target. After disabling debugWIRE mode, the MCU can be programmed again using SPI programming. |
 | `monitor help`                                        | Display help text.                                           |
 | `monitor info`                                        | Display information about the target and the state of the debugger. |
 | `monitor load` [`readbeforewrite`\|`writeonly`]       | When loading an executable, either each flash page is compared with the content to be loaded, and flashing is skipped if the content is already there, or each flash page is written without reading the current contents beforehand. The first option is the default option and there is no reason to change it. |
@@ -177,7 +212,6 @@ If the target board has an SPI programming header, it is easy to connect to it. 
 
 ![atmel-ice-connect](https://raw.githubusercontent.com/felias-fogg/dw-gdbserver/refs/heads/main/docs/pics/atmel-ice-connect.png)
 
-When using one of the commercial debuggers, you need to power the target board from an external source. With dw-link, you can choose to power the target board from the debugger or an external source.
 
 ### Connecting to targets without an SPI programming header
 
@@ -222,7 +256,12 @@ When you want to connect a **dw-link** debugger without a dw-link probe shield t
 | 5V (if powered by debugger) | Vcc        | 2       |
 | GND                         | GND        | 6       |
 
- When you have a dw-link probe shield, it is best to construct or buy a cable with a 6-pin SPI programming plug on one end and single DuPont pins on the other.
+With a dw-link probe shield, it is best to construct or buy a cable with a 6-pin SPI programming plug on one end and single DuPont pins on the other.
+
+### Powering the target board
+
+When using one of the commercial debuggers, you need to power the target board from an external source. With dw-link, you can choose to power the target board from the debugger or an external source.
+
 
 ## Integrated Development Environments and Graphical User Interfaces
 
@@ -278,12 +317,11 @@ board = ATmega328P
 board_build.f_cpu = 16000000L
 board_hardware.oscillator = external
 
-
 ```
 
 Note that the debug environment should be the default one. It should be the first if no default environment has been declared.
 
-I further noticed that the avr-gdb debugger in the PlatformIO toolchain is quite dated and often does not start (e.g. under Ubuntu 24.04). Simply replace it with a more recent version from /ust/bin or /usr/local/bin.
+I further noticed that the avr-gdb debugger in the PlatformIO toolchain is quite dated and often does not start (e.g. under Ubuntu 24.04). Simply replace it with a more recent version from /usr/bin or /usr/local/bin, perhaps after haing it installed with you local packet manager.
 
 ### Gede
 

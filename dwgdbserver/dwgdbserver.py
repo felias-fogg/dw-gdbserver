@@ -1855,7 +1855,7 @@ class MonitorCommand():
                                "You have to exit and restart the debugger")
                 # we set the state variable to active in the calling module
                 return("dwon", "debugWIRE mode is now enabled")
-            return("", "debugWIRE mode was already enabled")
+            return("reset", "debugWIRE mode was already enabled")
         if "disable".startswith(tokens[0]):
             if self._dw_mode_active:
                 self._dw_mode_active = False
