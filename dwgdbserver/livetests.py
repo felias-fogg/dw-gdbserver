@@ -41,7 +41,7 @@ class LiveTests():
         1b2:	d9:   29 e4       	ldi	 r18, 0x49	; 73
         1b4:	da:   20 93 00 01 	sts	0x0100, r18	; 0x800100 <dest>
         1b8:	dc:   00 91 00 01 	lds	r16, 0x0100	; 0x800100 <dest>
-        1bc:	de:   05 d0       	rcall .+10     	; 0x1c8 <SUBR>
+        1bc:	de:   00 00       	nop
         1be:	df:   f5 cf       	rjmp .-22     	; 0x1aa <START>
         1c0:	e0:   0e 94 e4 00 	call 0x1c8	    ; 0x1c8 <SUBR>
         1c4:	e2:   0c 94 d5 00 	jmp	0x1aa	    ; 0x1aa <START>
@@ -56,7 +56,7 @@ class LiveTests():
             msb = 0x01
             lsb = 0x00
         return bytearray([0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xcf, 0x29, 0xe4,
-                              0x20, 0x93, lsb, msb, 0x00, 0x91, lsb, msb, 0x05, 0xd0,
+                              0x20, 0x93, lsb, msb, 0x00, 0x91, lsb, msb, 0x00, 0x00,
                               0xf5, 0xcf, 0x0e, 0x94, 0xe4, 0x00, 0x0c, 0x94, 0xd5, 0x00,
                               0x11, 0xe9, 0x08, 0x95, 0x98, 0x95])
 
@@ -76,7 +76,7 @@ class LiveTests():
         self.mon.set_default_state()
         self.success = 0
         self.failure = 0
-        self.tests_total = 20
+        self.tests_total = 23
         try:
             self.handler.send_debug_message("Running live tests ...")
             self.logger.info("Starting live tests (will clobber SRAM and flash)")
@@ -84,6 +84,7 @@ class LiveTests():
             self._live_test_load()
             self._live_test_verify_loaded()
             self._live_test_continue_stop()
+            self._live_test_continue_at_break()
             self._live_test_get_register()
             self._live_test_set_register()
             self._live_test_get_memory_sram()
@@ -101,6 +102,8 @@ class LiveTests():
             self._live_test_set_sp()
             self._live_test_set_pc()
             self._live_test_step()
+            self._live_test_vcont_step_with_protected_bp()
+            self._live_test_vcont_range()
         except Exception as e: #pylint: disable=broad-exception-caught
             self.failure += 1
             self.logger.info("... failed")
@@ -164,7 +167,19 @@ class LiveTests():
         self.handler.dispatch("C", b"05;01AA")
         time.sleep(0.01)
         self.dbg.stop()
+        self.logger.debug("Sent: %s", self.send_string)
         self.check_result(self.dbg.program_counter_read() == (0x1B0 >> 1))
+
+    def _live_test_continue_at_break(self):
+        """
+        Test 'continue' at a 'break' location
+        """
+        self.logger.info("Running 'continue' at a location with a 'break' instruction ...")
+        self.handler.dispatch('c', b"01cc")
+        self.logger.debug("Sent: %s", self.send_string)
+        self.check_result(self.send_string == "S04")
+        self.dbg.stop() # stop execution in any case
+
 
     # no test for 'D' packet because unit tests are enough
 
@@ -361,23 +376,92 @@ class LiveTests():
         Tests 'step' function
         """
         self.logger.info("Running 'step' test ...")
+        self.send_string = ""
         self.dbg.sram_write(self.sram_start, bytearray([0]))
         self.dbg.sram_write(16, bytearray([0,0,0,0]))
         self.logger.debug("PC=%0X", self.dbg.program_counter_read() << 1)
         self.logger.debug("regs=%s", self.dbg.sram_read(16, 3))
         self.logger.debug("mem=%s", self.dbg.sram_read(self.sram_start, 1))
         self.handler.dispatch('S', b'05;01b2')
+        self.handler.poll_events()
+        send1 = self.send_string
+        self.send_string = ""
         self.logger.debug("Sending: %s", self.send_string)
         self.handler.dispatch('s', b'')
+        self.handler.poll_events()
+        send2 = self.send_string
+        self.send_string = ""
         self.logger.debug("Sending: %s", self.send_string)
         self.handler.dispatch('s', b'')
+        self.handler.poll_events()
+        send3 = self.send_string
         self.logger.debug("Sending: %s", self.send_string)
         self.logger.debug("PC=%0X", self.dbg.program_counter_read() << 1)
         self.logger.debug("regs=%s", self.dbg.sram_read(16, 3))
         self.logger.debug("mem=%s", self.dbg.sram_read(self.sram_start, 1))
         self.check_result(self.dbg.program_counter_read() << 1 == 0x1BC and
                               self.dbg.sram_read(16, 3) == bytearray([73, 0, 73]) and
-                              self.dbg.sram_read(self.sram_start, 1) == bytearray([73]))
+                              self.dbg.sram_read(self.sram_start, 1) == bytearray([73]) and
+                              send1.startswith("T05") and send2.startswith("T05") and
+                              send3.startswith("T05"))
 
     # T-package and vCont;? is covered by unit test
     # vCont;c, vCont;C, vCont;s, vCont;S covered already above
+
+    def _live_test_vcont_step_with_protected_bp(self):
+        self.dbg.program_counter_write(0x1b2 >> 1)
+        self.dbg.stack_pointer_write(bytearray([0x34, 0x00]))
+        self.dbg.status_register_write(bytearray([0x87]))
+        self.handler.dispatch("Z", b"1,1b4,2")
+        self.handler.dispatch("Z", b"1,1b8,2")
+        self.handler.dispatch("Z", b"1,1bc,2")
+        self.mon._cache = False
+        opc1 = self.mem.flash_read_word(0x1b4)
+        self.logger.debug("Opcode before 'continue': 0x%X", opc1)
+        self.send_string = ""
+        self.handler.dispatch("vCont", b";c")
+        time.sleep(0.1)
+        self.handler.poll_events()
+        send1 = self.send_string
+        self.dbg.stop() # in order to stop a runaway!
+        self.logger.debug("Result of 'continue': %s", send1)
+        opc2 = self.mem.flash_read_word(0x1b4)
+        self.logger.debug("Opcode after 'continue': 0x%X", opc2)
+        self.handler.dispatch("z", b"1,1b4,2")
+        self.handler.dispatch("z", b"1,1b8,2")
+        self.handler.dispatch("z", b"1,1bc,2")
+        opc3 = self.mem.flash_read_word(0x1b4)
+        self.logger.debug("Opcode after 'delete BP': 0x%X", opc3)
+        self.handler.dispatch("Z", b"1,1b8,2")
+        self.handler.dispatch("Z", b"1,1bc,2")
+        opc4 = self.mem.flash_read_word(0x1b4)
+        self.logger.debug("Opcode before 'step': 0x%X", opc4)
+        self.send_string = ""
+        self.handler.dispatch("vCont", b";s")
+        send2 = self.send_string
+        self.logger.debug("Result of 'step': %s", send2)
+        opc5 = self.mem.flash_read_word(0x1b4)
+        self.logger.debug("Opcode after 'step': 0x%X", opc5)
+        self.handler.dispatch("Z", b"1,1b4,2")
+        opc6 = self.mem.flash_read_word(0x1b4)
+        self.logger.debug("Opcode after 'insert BP': 0x%X", opc6)
+        self.check_result(self.dbg.program_counter_read() == (0x1b8 >> 1) and
+                              send1 == "T0520:87;21:3400;22:b4010000;thread:1;" and
+                              send2 == "T0520:87;21:3400;22:b8010000;thread:1;" and
+                              opc1 == 0x9320 and opc2 == 0x9598 and
+                              opc3 == opc2 and opc4 == opc2 and opc5 == opc2 and
+                              opc6 == opc2)
+        self.mon._cache = True
+        self.bp.cleanup_breakpoints()
+
+    def _live_test_vcont_range(self):
+        self.dbg.program_counter_write(0x1b2 >> 1)
+        self.send_string = ""
+        self.handler.dispatch("vCont", b";r1b2,1c0")
+        time.sleep(0.1)
+        self.handler.poll_events()
+        send1 = self.send_string
+        self.dbg.stop() # in order to stop a runaway!
+        self.logger.debug("Result of range-stepping: %s", send1)
+        self.check_result(self.dbg.program_counter_read() == (0x1aa >> 1) and
+                              send1.startswith("T05"))

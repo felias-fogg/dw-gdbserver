@@ -1079,12 +1079,18 @@ class BreakAndExec():
         if self._bigmem:
             raise FatalError("Cannot deal with address spaces larger than 128 MB")
 
+    def _read_filtered_flash_word(self, address):
+        """
+        Instead of reading directly from flash memory, we filter out break points.
+        """
+        if address in self._bp:
+            return self._bp[address]['opcode']
+        return self._read_flash_word(address)
 
     def insert_breakpoint(self, address):
         """
         Generate a new breakpoint at given address, do not allocate flash or hwbp yet
-        Will return False if no breakpoint can be set.
-        This method will be called immediately before GDB starts executing or single-stepping
+        This method will be called before GDB starts executing or single-stepping.
         """
         if address % 2 != 0:
             self.logger.error("Breakpoint at odd address: 0x%X", address)
@@ -1106,7 +1112,7 @@ class BreakAndExec():
         opcode = self._read_flash_word(address)
         secondword = self._read_flash_word(address+2)
         self._bstamp += 1
-        self._bp[address] =  {'inuse' : True, 'active': True, 'inflash': False,
+        self._bp[address] =  {'active': True, 'inflash': False,
                                   'hwbp' : None, 'opcode': opcode,
                                   'secondword' : secondword, 'timestamp' : self._bstamp }
         self.logger.debug("New BP at 0x%X: %s", address,  self._bp[address])
@@ -1132,21 +1138,24 @@ class BreakAndExec():
         self.logger.debug("BP at 0x%X is now inactive", address)
         self.logger.debug("Only %d BPs are now active", self._bpactive)
 
-    def update_breakpoints(self, reserved):
+    def update_breakpoints(self, reserved, protected_bp):
         """
         This is called directly before execution is started. It will remove
-        inactive breakpoints, will assign the hardware breakpoints to the most
-        recently added breakpoints, and request to set active breakpoints into flash,
-        if they not there already. The reserved argument states how many HWBPs should
-        be reserved for single- or range-stepping. The method will return False
-        when at least one BP cannot be activated due to resource restrictions
-        (e.g., not enough HWBPs).
+        inactive breakpoints different from protected_bp, it will assign the hardware
+        breakpoints to the most recently added breakpoints, and request to set active
+        breakpoints into flash, if they not there already. The reserved argument states
+        how many HWBPs should be reserved for single- or range-stepping. the argument protected_bp
+        is set by single and range-stepping, when we start at a place where there is a
+        software breakpoint set. In this case, we do a single-step and then wait for
+        GDB to re-actoivate the BP.
+        The method will return False when at least one BP cannot be activated due
+        to resource restrictions (e.g., not enough HWBPs).
         """
         # remove inactive BPs and de-allocate BPs that are now forbidden
-        if not self.remove_inactive_and_deallocate_forbidden_bps(reserved):
+        if not self.remove_inactive_and_deallocate_forbidden_bps(reserved, protected_bp):
             return False
         self.logger.debug("Updating breakpoints before execution")
-        # all remaining BPs are active
+        # all remaining BPs are active or protected
         # assign HWBPs to the most recently introduced BPs
         # take into account the possibility that hardware breakpoints are not allowed or reserved
         sortedbps = sorted(self._bp.items(), key=lambda entry: entry[1]['timestamp'], reverse=True)
@@ -1190,11 +1199,13 @@ class BreakAndExec():
                 bp['inflash'] = True
         return True
 
-    def remove_inactive_and_deallocate_forbidden_bps(self, reserved):
+    def remove_inactive_and_deallocate_forbidden_bps(self, reserved, protected_bp):
         """
         Remove all inactive BPs and deallocate BPs that are forbidden
-        (after changing BP preference). Return False if a non-existent
-        HWBP shall be cleared.
+        (after changing BP preference). A protected BP is not deleted!
+        These are BPs at the current PC that have been set before and
+        will now be overstepped in a single-step action.
+        Return False if a non-existent HWBP shall be cleared.
         """
         self.logger.debug("Deallocate forbidden BPs and remove inactive ones")
         for a, bp in list(self._bp.items()):
@@ -1221,6 +1232,11 @@ class BreakAndExec():
                     return False
                 self._hw[bp['hwbp']] = None
                 bp['hwbp'] = None
+            # check for protected BP
+            if a == protected_bp:
+                self.logger.debug("BP at 0x%X is protected", a)
+                continue
+            # delete BP
             if not bp['active']: # delete inactive BP
                 self.logger.debug("BP at 0x%X is not active anymore", a)
                 if bp['inflash']:
@@ -1255,15 +1271,15 @@ class BreakAndExec():
         Start execution at given addr (byte addr). If none given, use the actual PC.
         Update breakpoints in memory and the HWBP. Return SIGABRT if not enough break points.
         """
-        if not self.update_breakpoints(0):
+        if not self.update_breakpoints(0, -1):
             return SIGABRT
         if addr:
             self.dbg.program_counter_write(addr>>1)
         else:
             addr = self.dbg.program_counter_read() << 1
-        opcode = self._read_flash_word(addr)
-        if opcode == BREAKCODE: # this should not happen!
-            self.logger.debug("Stopping execution in 'single-step' because of BREAK instruction")
+        opcode = self._read_filtered_flash_word(addr)
+        if opcode == BREAKCODE: # this should not happen at all
+            self.logger.debug("Stopping execution in 'continue' because of BREAK instruction")
             return SIGILL
         if opcode == SLEEPCODE: # ignore sleep
             self.logger.debug("Ignoring sleep in 'single-step'")
@@ -1300,7 +1316,7 @@ class BreakAndExec():
         else:
             addr = self.dbg.program_counter_read() << 1
         self.logger.debug("One single step at 0x%X", addr)
-        opcode = self._read_flash_word(addr)
+        opcode = self._read_filtered_flash_word(addr)
         if opcode == BREAKCODE: # this should not happen!
             self.logger.debug("Stopping execution in 'single-step' because of BREAK instruction")
             return SIGILL
@@ -1312,7 +1328,7 @@ class BreakAndExec():
         if self.mon.is_old_exec():
             self.dbg.step()
             return SIGTRAP
-        if not self.update_breakpoints(1):
+        if not self.update_breakpoints(1, addr):
             return SIGABRT
         # if there is a two word instruction and
         # a SWBP at the place where we want to step, simulate!
@@ -1330,7 +1346,7 @@ class BreakAndExec():
             self.dbg.step()
             return SIGTRAP
         # now we have to do the dance using the HWBP or masking the I-bit
-        opcode = self._read_flash_word(addr)
+        opcode = self._read_filtered_flash_word(addr)
         self.logger.debug("Interrupt-safe stepping begins here")
         destination = None
         # compute destination for straight-line instructions and branches on I-Bit
@@ -1387,17 +1403,16 @@ class BreakAndExec():
         reservehwbps = len(self._range_exit)
         if reservehwbps > self._hwbps or self.mon.is_onlyhwbps():
             reservehwbps = 1
-        if not self.update_breakpoints(reservehwbps):
-            return SIGABRT
         addr = self.dbg.program_counter_read() << 1
+        if not self.update_breakpoints(reservehwbps, addr):
+            return SIGABRT
         if addr < start or addr >= end: # starting outside of range, should not happen!
             self.logger.error("PC 0x%X outside of range boundary", addr)
             return self.single_step(None)
-        if addr in self._range_exit: # starting at possible exit point inside range
-            return self.single_step(None)
-        opcode = self._read_flash_word(addr)
-        if opcode in { BREAKCODE, SLEEPCODE }:
-            return self.single_step(None)
+        if (addr in self._range_exit or # starting at possible exit point inside range
+            self._read_filtered_flash_word(addr) in { BREAKCODE, SLEEPCODE } or # special opcode
+            addr in self._bp): # a protected bp at this point
+            return self.single_step(None) # reduce to one step!
         if len(self._range_exit) == reservehwbps: # we can cover all exit points!
             # if more HWBPs, one could use them here!
             # #MOREHWBPS
@@ -1430,7 +1445,7 @@ class BreakAndExec():
         self._range_start = start
         self._range_end = end
         for a in range(start, end+2, 2):
-            self._range_word += [ self._read_flash_word(a) ]
+            self._range_word += [ self._read_filtered_flash_word(a) ]
         i = 0
         while i < len(self._range_word) - 1:
             dest = []

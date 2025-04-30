@@ -40,9 +40,9 @@ class TestBreakAndExec(TestCase):
         self.bp._read_flash_word.side_effect = [ BREAKCODE, 0x1111, 0x2222, 0x3333 ]
         self.bp.insert_breakpoint(100)
         self.bp.insert_breakpoint(200)
-        self.assertEqual(self.bp._bp, {100: {'inuse' : True, 'active': True, 'inflash': False, 'hwbp' : None,
+        self.assertEqual(self.bp._bp, {100: { 'active': True, 'inflash': False, 'hwbp' : None,
                                     'opcode': BREAKCODE, 'secondword' : 0x1111, 'timestamp' : 1 },
-                                       200:  {'inuse' : True, 'active': True, 'inflash': False, 'hwbp' : None,
+                                       200:  { 'active': True, 'inflash': False, 'hwbp' : None,
                                     'opcode': 0x2222, 'secondword' : 0x3333, 'timestamp' : 2 }})
 
     def test_remove_breakpoint_old_exec(self):
@@ -52,9 +52,9 @@ class TestBreakAndExec(TestCase):
 
     def test_remove_breakpoints_regular_idempotent(self):
         self.bp.mon.is_onlyhwbps.return_value = False
-        self.bp._bp = {100: {'inuse' : True, 'active': True, 'inflash': False, 'hwbp' : None,
+        self.bp._bp = {100: { 'active': True, 'inflash': False, 'hwbp' : None,
                                  'opcode': BREAKCODE, 'secondword' : 0x1111, 'timestamp' : 1 },
-                       200:  {'inuse' : True, 'active': True, 'inflash': False, 'hwbp' : None,
+                       200:  { 'active': True, 'inflash': False, 'hwbp' : None,
                                   'opcode': 0x2222, 'secondword' : 0x3333, 'timestamp' : 2 }}
         self.bp._bpactive = 2
         self.bp.remove_breakpoint(100)
@@ -67,9 +67,9 @@ class TestBreakAndExec(TestCase):
         self.assertEqual(self.bp._bpactive, 0)
         self.bp.remove_breakpoint(200)
         self.assertEqual(self.bp._bpactive, 0)
-        self.assertEqual(self.bp._bp, {100: {'inuse' : True, 'active': False, 'inflash': False, 'hwbp' : None,
+        self.assertEqual(self.bp._bp, {100: { 'active': False, 'inflash': False, 'hwbp' : None,
                                     'opcode': BREAKCODE, 'secondword' : 0x1111, 'timestamp' : 1 },
-                                       200:  {'inuse' : True, 'active': False, 'inflash': False, 'hwbp' : None,
+                                       200:  { 'active': False, 'inflash': False, 'hwbp' : None,
                                     'opcode': 0x2222, 'secondword' : 0x3333, 'timestamp' : 2 }})
 
     def test_update_breakpoints_update_remove_sethwbp(self):
@@ -78,22 +78,47 @@ class TestBreakAndExec(TestCase):
         self.bp.mon.is_onlyhwbps.return_value = False
         self.bp.mon.is_onlyswbps.return_value = False
         self.bp._bstamp = 6
-        self.bp._bp = {100: {'inuse' : True, 'active': True, 'inflash': False, 'hwbp' : None, # will get swbp
+        self.bp._bp = {100: { 'active': True, 'inflash': False, 'hwbp' : None, # will get swbp
                                  'opcode': BREAKCODE, 'secondword' : 0x1111, 'timestamp' : 2 },
-                       200:  {'inuse' : True, 'active': False, 'inflash': True, 'hwbp' : None, # will remove swbp
+                       200:  { 'active': False, 'inflash': True, 'hwbp' : None, # will remove swbp
                                   'opcode': 0x2221, 'secondword' : 0x3331, 'timestamp' : 5 },
-                       300:  {'inuse' : True, 'active': False, 'inflash': False, 'hwbp' : 1, # will remove hwbp
+                       300:  { 'active': False, 'inflash': False, 'hwbp' : 1, # will remove hwbp
                                   'opcode': 0x2222, 'secondword' : 0x3332, 'timestamp' : 1 },
-                       400:  {'inuse' : True, 'active': True, 'inflash': False, 'hwbp' : None, # gets an hwbp
+                       400:  { 'active': True, 'inflash': False, 'hwbp' : None, # gets an hwbp
                                   'opcode': 0x2223, 'secondword' : 0x3333, 'timestamp' : 3 }}
-        self.bp.update_breakpoints(0)
-        self.assertEqual(self.bp._bp, {100: {'inuse' : True, 'active': True, 'inflash': True, 'hwbp' : None,
+        self.bp.update_breakpoints(0, -1)
+        self.assertEqual(self.bp._bp, {100: { 'active': True, 'inflash': True, 'hwbp' : None,
                                     'opcode': BREAKCODE, 'secondword' : 0x1111, 'timestamp' : 2 },
-                                       400:  {'inuse' : True, 'active': True, 'inflash': False, 'hwbp' : 1,
+                                       400:  { 'active': True, 'inflash': False, 'hwbp' : 1,
                                     'opcode': 0x2223, 'secondword' : 0x3333, 'timestamp' : 3 }})
         self.assertEqual(self.bp._hw, [-1, 400 ])
         self.bp.dbg.software_breakpoint_clear.assert_called_with(200)
         self.bp.dbg.software_breakpoint_set.assert_called_with(100)
+
+    def test_update_breakpoints_with_protected_bp_and_reserved_hwbp(self):
+        self.maxDiff = None
+        self.bp._hw[1] = 0x300
+        self.bp.mon.is_onlyhwbps.return_value = False
+        self.bp.mon.is_onlyswbps.return_value = False
+        self.bp._bstamp = 6
+        self.bp._bp = {100: { 'active': True, 'inflash': False, 'hwbp' : None, # will get swbp
+                                 'opcode': BREAKCODE, 'secondword' : 0x1111, 'timestamp' : 2 },
+                       200:  { 'active': False, 'inflash': True, 'hwbp' : None, # will remove swbp
+                                  'opcode': 0x2221, 'secondword' : 0x3331, 'timestamp' : 5 },
+                       300:  { 'active': False, 'inflash': False, 'hwbp' : 1, # will remove hwbp
+                                  'opcode': 0x2222, 'secondword' : 0x3332, 'timestamp' : 1 },
+                       400:  { 'active': True, 'inflash': False, 'hwbp' : None, # gets an hwbp
+                                  'opcode': 0x2223, 'secondword' : 0x3333, 'timestamp' : 3 }}
+        self.bp.update_breakpoints(1, 300)
+        self.assertEqual(self.bp._bp, {100: { 'active': True, 'inflash': True, 'hwbp' : None,
+                                        'opcode': BREAKCODE, 'secondword' : 0x1111, 'timestamp' : 2 },
+                                        300:  { 'active': False, 'inflash': True, 'hwbp' : None,
+                                        'opcode': 0x2222, 'secondword' : 0x3332, 'timestamp' : 1 },
+                                        400:  { 'active': True, 'inflash': True, 'hwbp' : None,
+                                        'opcode': 0x2223, 'secondword' : 0x3333, 'timestamp' : 3 }})
+        self.assertEqual(self.bp._hw, [-1, None ])
+        self.bp.dbg.software_breakpoint_clear.assert_called_with(200)
+        self.bp.dbg.software_breakpoint_set.assert_has_calls([call(100), call(300), call(400)], any_order=True)
 
     def test_update_breakpoints_update_remove_stealhwbp(self):
         self.maxDiff = None
@@ -102,22 +127,22 @@ class TestBreakAndExec(TestCase):
         self.bp.mon.is_onlyswbps.return_value = False
         self.bp._bstamp = 6
         self.bp._bpactive = 3
-        self.bp._bp = {100: {'inuse' : True, 'active': True, 'inflash': False, 'hwbp' : 1, # will have to give up hwbp
+        self.bp._bp = {100: { 'active': True, 'inflash': False, 'hwbp' : 1, # will have to give up hwbp
                                  'opcode': BREAKCODE, 'secondword' : 0x1111, 'timestamp' : 1 },
-                       200:  {'inuse' : True, 'active': False, 'inflash': True, 'hwbp' : None, # will remove swbp
+                       200:  { 'active': False, 'inflash': True, 'hwbp' : None, # will remove swbp
                                   'opcode': 0x2221, 'secondword' : 0x3331, 'timestamp' : 2 },
-                       300:  {'inuse' : True, 'active': False, 'inflash': True, 'hwbp' : None, # will remove swbp
+                       300:  { 'active': False, 'inflash': True, 'hwbp' : None, # will remove swbp
                                   'opcode': 0x2222, 'secondword' : 0x3332, 'timestamp' : 3 },
-                       400:  {'inuse' : True, 'active': True, 'inflash': False, 'hwbp' : None, # will become swbp
+                       400:  { 'active': True, 'inflash': False, 'hwbp' : None, # will become swbp
                                   'opcode': 0x2223, 'secondword' : 0x3333, 'timestamp' : 4 },
-                       500:  {'inuse' : True, 'active': True, 'inflash': False, 'hwbp' : None, # gets hwbp
+                       500:  { 'active': True, 'inflash': False, 'hwbp' : None, # gets hwbp
                                   'opcode': 0x2224, 'secondword' : 0x3334, 'timestamp' : 5 }}
-        self.bp.update_breakpoints(0)
-        self.assertEqual(self.bp._bp, {100: {'inuse' : True, 'active': True, 'inflash': True, 'hwbp' : None,
+        self.bp.update_breakpoints(0, -1)
+        self.assertEqual(self.bp._bp, {100: { 'active': True, 'inflash': True, 'hwbp' : None,
                                     'opcode': BREAKCODE, 'secondword' : 0x1111, 'timestamp' : 1 },
-                                       400:  {'inuse' : True, 'active': True, 'inflash': True, 'hwbp' : None,
+                                       400:  { 'active': True, 'inflash': True, 'hwbp' : None,
                                     'opcode': 0x2223, 'secondword' : 0x3333, 'timestamp' : 4 },
-                                       500:  {'inuse' : True, 'active': True, 'inflash': False, 'hwbp' : 1,
+                                       500:  { 'active': True, 'inflash': False, 'hwbp' : 1,
                                     'opcode': 0x2224, 'secondword' : 0x3334, 'timestamp' : 5 }})
         self.assertEqual(self.bp._hw, [-1, 500 ])
         self.bp.dbg.software_breakpoint_clear.assert_has_calls([call(200), call(300)], any_order=True)
@@ -333,7 +358,6 @@ class TestBreakAndExec(TestCase):
         code = [ 0xef2f, 0xee81, 0xe094 ]
         self.bp._read_flash_word.side_effect = code
         self.assertEqual(self.bp.range_step(10,14), SIGABRT)
-        self.bp.dbg.program_counter_read.assert_not_called()
         self.bp.dbg.step.assert_not_called()
         self.bp.dbg.run.assert_not_called()
         self.bp.dbg.run_to.assert_not_called()

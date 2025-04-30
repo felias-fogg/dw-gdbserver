@@ -1,5 +1,13 @@
 # Changelog
 
+### V2.2.0-pre4 (30-Apr-2025)
+
+- Fixed: Inactive BPs at the current location were removed before making a single step. This was functionally OK, but it increased flash wear significantly because when GDB proceeds from a BP, it first reinserts all other BPs, then it makes a single step, reinserts the overstepped BP, and finally continues execution. For this reason, when updating the BPs, we now protect an inactive BP at the current location.  This is also done in range-stepping. We also stop after one range-stepping step, when we overstepped a protected inactive BP.
+- Changed: Removed 'inuse' from breakpoint entry because it was not used at all.
+- Added: _read_filtered_flash_word in BreakAndExec (if we do not use the cache, it may be safer)
+- Added: Live test for 'vCont;c' and vCont;s' with a BP at the current position
+- Added: Live test for 'vCont;r....'
+
 ### V2.2.0-pre3 (27-Apr-2025)
 
 - Added 'reset' in `monitor debugwire enable` command when debugWIRE mode was already enabled. This means we can use this command as a 'reset' command in CLion.
