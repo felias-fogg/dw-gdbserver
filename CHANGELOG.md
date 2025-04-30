@@ -1,5 +1,9 @@
 # Changelog
 
+V2.2.0 (30-Apr-2025)
+
+- Fixed: We will always stop after the first step of a (repeated) range-stepping command, allowing GDB to insert a BP at the beginning of the range.‚
+
 ### V2.2.0-pre4 (30-Apr-2025)
 
 - Fixed: Inactive BPs at the current location were removed before making a single step. This was functionally OK, but it increased flash wear significantly because when GDB proceeds from a BP, it first reinserts all other BPs, then it makes a single step, reinserts the overstepped BP, and finally continues execution. For this reason, when updating the BPs, we now protect an inactive BP at the current location.  This is also done in range-stepping. We also stop after one range-stepping step, when we overstepped a protected inactive BP.
@@ -17,8 +21,8 @@
 ### V2.2.0-pre1 (24-Apr-2025)
 
 - Added: Live tests for: 'X', C', 'g', 'G', 'm', 'M', 'p', and 'P' packages
-- Fixed: p20 (SREG) led to a typing error
-- Fixed: p21 (SP) led to a typing error
+- Fixed: p20 (SREG) package led to a typing error
+- Fixed: p21 (SP) package led to a typing error
 
 ### V2.1.8-post2 (21-Apr-2025)
 

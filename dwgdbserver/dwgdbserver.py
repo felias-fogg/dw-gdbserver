@@ -1271,6 +1271,7 @@ class BreakAndExec():
         Start execution at given addr (byte addr). If none given, use the actual PC.
         Update breakpoints in memory and the HWBP. Return SIGABRT if not enough break points.
         """
+        self._range_start = None
         if not self.update_breakpoints(0, -1):
             return SIGABRT
         if addr:
@@ -1298,7 +1299,7 @@ class BreakAndExec():
         return None
 
     #pylint: disable=too-many-return-statements, too-many-statements
-    def single_step(self, addr):
+    def single_step(self, addr, fresh=True):
         """
         Perform a single step. If at the current location, there is a software breakpoint,
         we simulate a two-word instruction or ask the hardware debugger to do a single step
@@ -1311,6 +1312,8 @@ class BreakAndExec():
         afterwards (if necessary). For those branching on the I-Bit, we will evaluate and
         then set the hardware BP.
         """
+        if fresh:
+            self._range_start = None
         if addr:
             self.dbg.program_counter_write(addr>>1)
         else:
@@ -1387,6 +1390,8 @@ class BreakAndExec():
         one exit point, we watch that. If it is an inside point (e.g., RET), we single-step on it.
         Otherwise, we break at each branching point and single-step this branching instruction.
         In principle this can be generalized to n exit points (n being the number of hardware BPs).
+        Note that we need to return after the first step to allow GDB to set a breakpoint at the
+        location where we started.
         """
         #pylint: disable=too-many-return-statements
         self.logger.debug("Range stepping from 0x%X to 0x%X", start, end)
@@ -1399,7 +1404,7 @@ class BreakAndExec():
         if start == end:
             self.logger.debug("Empty range: Simply single step")
             return self.single_step(None)
-        self.build_range(start, end)
+        new_range = self.build_range(start, end)
         reservehwbps = len(self._range_exit)
         if reservehwbps > self._hwbps or self.mon.is_onlyhwbps():
             reservehwbps = 1
@@ -1411,20 +1416,21 @@ class BreakAndExec():
             return self.single_step(None)
         if (addr in self._range_exit or # starting at possible exit point inside range
             self._read_filtered_flash_word(addr) in { BREAKCODE, SLEEPCODE } or # special opcode
-            addr in self._bp): # a protected bp at this point
-            return self.single_step(None) # reduce to one step!
+            addr in self._bp or # a protected bp at this point
+            new_range): # or it is a new range
+            return self.single_step(None, fresh=False) # reduce to one step!
         if len(self._range_exit) == reservehwbps: # we can cover all exit points!
             # if more HWBPs, one could use them here!
             # #MOREHWBPS
             self.dbg.run_to(list(self._range_exit)[0]) # this covers only 1 exit point!
             return None
         if addr in self._range_branch: # if branch point, single-step
-            return self.single_step(None)
+            return self.single_step(None, fresh=False)
         for b in self._range_branch:   # otherwise search for next branch point and stop there
             if addr < b:
                 self.dbg.run_to(b)
                 return None
-        return self.single_step(None)
+        return self.single_step(None, fresh=False)
 
     def build_range(self, start, end):
         #pylint: disable=too-many-branches
@@ -1433,12 +1439,13 @@ class BreakAndExec():
         an instruction possibly leaves the range. This includes the first instruction
         after the range, provided it is reachable. These points are remembered in
         self._range_exit. If the number of exits is less than or equal to the number of
-        hardware BPs, then one can check for all them. In case of DW this number is one.
+        hardware BPs, then one can check for all them. In case of dW this number is one.
         However, this is enough for handling _delay_ms(_). In all other cases, we stop at all
         branching instructions, memorized in self._range_branch, and single-step them.
+        Return False, if the range is already established.
         """
         if start == self._range_start and end == self._range_end:
-            return # previously analyzed
+            return False # previously analyzed
         self._range_word = []
         self._range_exit = set()
         self._range_branch = []
@@ -1482,6 +1489,7 @@ class BreakAndExec():
         self._range_branch += [ end ]
         self.logger.debug("Exit points: %s", {hex(x) for x in self._range_exit})
         self.logger.debug("Branch points: %s", [hex(x) for x in self._range_branch])
+        return True
 
     @staticmethod
     def branch_instr(opcode):
