@@ -1,8 +1,12 @@
 # Changelog
 
-V2.2.0 (30-Apr-2025)
+### V2.2.0-post1 (1-May-2025)
 
-- Fixed: We will always stop after the first step of a (repeated) range-stepping command, allowing GDB to insert a BP at the beginning of the range.‚
+- Readme updated: MiniCore and MicroCore include dw-gdbserver as an integrated debugging solution for Arduino IDE 2.
+
+### V2.2.0 (30-Apr-2025)
+
+- Fixed: We will always stop after the first step of a (repeated) range-stepping command, allowing GDB to insert a BP at the beginning of the range.
 
 ### V2.2.0-pre4 (30-Apr-2025)
 

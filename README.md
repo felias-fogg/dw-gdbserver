@@ -204,9 +204,11 @@ Arduino IDE 2 is probably the most straightforward option. You only need to add 
 
 ```
 https://felias-fogg.github.io/ATTinyCore/package_drazzy.com_ATTinyCore_index.json
+https://mcudude.github.io/MicroCore/package_MCUdude_MicroCore_index.json
+https://mcudude.github.io/MiniCore/package_MCUdude_MiniCore_index.json
 ```
 
-After that, you must install the respective cores, which enables you to debug almost all classic AVR chips (MiniCore and MicroCore will come soon!). And this is all! Now, you can press the debug button and start debugging. See, e.g., this [short tutorial](https://docs.arduino.cc/software/ide-v2/tutorials/ide-v2-debugger/) about debugging in the Arduino IDE 2
+After that, you must install the respective cores, which enables you to debug almost all classic AVR chips that use the debugWIRE interface. And this is all! Now, you can press the debug button and start debugging. See, e.g., this [short tutorial](https://docs.arduino.cc/software/ide-v2/tutorials/ide-v2-debugger/) about debugging in the Arduino IDE 2 documentation.
 
 Linux users may need to add a few udev rules. When you first start the Arduino IDE debugger and the hardware debuggers are not recognized, you will get a hint in the `gdb-server` window of how to set the udev rules. You simply have to execute dw-gdbserver once using the command line option `--install-udev-rules`. Instead, you can create a udev-rules file along the lines described below.
 
