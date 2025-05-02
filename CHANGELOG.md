@@ -1,14 +1,22 @@
 # Changelog
 
-### V2.2.0-post1 (1-May-2025)
+### v2.2.1 (2-May-2025)
+
+- Changed: HW BPs will no longer be protected (when doing a single step). While protecting an HW BP is not wrong, it is unnecessary. Further, it implies you cannot run the debugger with only one HW BP in HWBP-only mode.
+- Changed: If we try to single-step at a location with an SW BP, we now either simulate or request a single step from the OCD, which will execute it offline. This saves one HW BP reassignment in case of a straight-line instruction.
+- Fixed: Calling cleanup_breakpoints in vErase and X-packets for flash. Without, SW BPs might be overwritten without it being noticed by the hardware debugger. Does not happen when using the debugger of an IDE, but it may occur when debugging using the CLI.
+- Added: Live tests for the above cases
+- Added: Dummy tool packages for 32-bit systems. When executed, they give an error message suggesting installing a local debugging solution or reinstalling the board package when running on a 64-bit system. This is not part of the current repo but part of the distribution repos felias-fogg.github.io and the core repos.
+
+### v2.2.0-post1 (1-May-2025)
 
 - Readme updated: MiniCore and MicroCore include dw-gdbserver as an integrated debugging solution for Arduino IDE 2.
 
-### V2.2.0 (30-Apr-2025)
+### v2.2.0 (30-Apr-2025)
 
 - Fixed: We will always stop after the first step of a (repeated) range-stepping command, allowing GDB to insert a BP at the beginning of the range.
 
-### V2.2.0-pre4 (30-Apr-2025)
+### v2.2.0-pre4 (30-Apr-2025)
 
 - Fixed: Inactive BPs at the current location were removed before making a single step. This was functionally OK, but it increased flash wear significantly because when GDB proceeds from a BP, it first reinserts all other BPs, then it makes a single step, reinserts the overstepped BP, and finally continues execution. For this reason, when updating the BPs, we now protect an inactive BP at the current location.  This is also done in range-stepping. We also stop after one range-stepping step, when we overstepped a protected inactive BP.
 - Changed: Removed 'inuse' from breakpoint entry because it was not used at all.
@@ -16,39 +24,39 @@
 - Added: Live test for 'vCont;c' and vCont;s' with a BP at the current position
 - Added: Live test for 'vCont;r....'
 
-### V2.2.0-pre3 (27-Apr-2025)
+### v2.2.0-pre3 (27-Apr-2025)
 
 - Added 'reset' in `monitor debugwire enable` command when debugWIRE mode was already enabled. This means we can use this command as a 'reset' command in CLion.
-### V2.0.0-pre2 (27-Apr-2025)
+### v2.0.0-pre2 (27-Apr-2025)
 
 - Added: Live test for 'S' packet
-### V2.2.0-pre1 (24-Apr-2025)
+### v2.2.0-pre1 (24-Apr-2025)
 
 - Added: Live tests for: 'X', C', 'g', 'G', 'm', 'M', 'p', and 'P' packages
 - Fixed: p20 (SREG) package led to a typing error
 - Fixed: p21 (SP) package led to a typing error
 
-### V2.1.8-post2 (21-Apr-2025)
+### v2.1.8-post2 (21-Apr-2025)
 
 - Readme file changed concerning which core files are available
 
-### V2.1.8-post1 (16-Apr-2025)
+### v2.1.8-post1 (16-Apr-2025)
 
 - Fixed: Pictures in the readme file are embedded using absolute URLs because PyPI cannot deal with relative ones (since it does not upload the entire GitHub repo).
 
-### V2.1.8 (15-Apr-2025)
+### v2.1.8 (15-Apr-2025)
 
 - Fixed: For Intel and Apple Silicon Macs, libusb is now bundled in the binary so that the user does not have to deal with the nuisance of providing the right libusb (which is actually not trivial when on an Apple Silicon Mac you have a Rosetta homebrew installation).
 
-### V2.1.7 (15-Apr-2025)
+### v2.1.7 (15-Apr-2025)
 
 - Added: More info logs when using automatic switching to debugWIRE mode
 
-### V2.1.6 (14-Apr-2015)
+### v2.1.6 (14-Apr-2015)
 
 - Fixed: Since multiple -c options are possible, applying the strip method does not work. Instead, we deal with the single relevant command now.
 
-### V2.1.5 (13-Apr-2025)
+### v2.1.5 (13-Apr-2025)
 
 - Fixed: Gede is now supported (and not only announced as an option)
 - Fixed: Leading and trailing spaces are removed from command line arguments. A leading space happened when specifying an option in the `platformio.ini` file.
@@ -59,15 +67,15 @@ the PC. Otherwise, we might just got stuck at this point.
 - Added: A few info logs when enabling/disabling debugWIRE
 - Added: Info log for MCU reset
 
-### V2.1.4 (12-Apr-2025)
+### v2.1.4 (12-Apr-2025)
 
 - Fixed: Removed the non-emptiness test for the result of writing something to memory in `Memory.writemem`. This test led to a load error when using a debugger without EXPAT support, but would have also affected other write operations.
 
-### V2.1.3 (11-Apr-2025)
+### v2.1.3 (11-Apr-2025)
 
 - Refined the messages concerning the installation of udev rules.
 
-### V2.1.2 (10-Apr-2025)
+### v2.1.2 (10-Apr-2025)
 
 - Added: Make a difference between none and too many debuggers (well, it is probably not too relevant for the average user).
 

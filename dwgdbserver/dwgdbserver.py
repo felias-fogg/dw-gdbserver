@@ -170,12 +170,12 @@ class GdbHandler():
         """
         self.logger.debug("RSP packet: Continue")
         if not self.mon.is_dw_mode_active():
-            self.logger.debug("Cannot start execution because not connected")
+            self.logger.warning("Cannot start execution because not connected to OCD")
             self.send_debug_message("Enable debugWIRE first: 'monitor debugwire enable'")
             self.send_signal(SIGHUP)
             return
         if self.mem.is_flash_empty() and not self.mon.is_noload():
-            self.logger.debug("Cannot start execution without prior load")
+            self.logger.warning("Cannot start execution without prior loading of executable")
             self.send_debug_message("Load executable first before starting execution")
             self.send_signal(SIGILL)
             return
@@ -579,6 +579,7 @@ class GdbHandler():
         vFlashDone command.
         """
         self.logger.debug("RSP packet: vFlashErase")
+        self.bp.cleanup_breakpoints()
         if self._vflashdone:
             self._vflashdone = False
             self.mem.init_flash() # clear cache
@@ -685,6 +686,8 @@ class GdbHandler():
             self.logger.error("Size of data packet does not fit: %s", packet)
             self.send_packet("E15")
             return
+        if int(addr,16) < 0x80000: # writing to flash
+            self.bp.cleanup_breakpoints() # cleanup breakpoints before load
         try:
             reply = self.mem.writemem(addr, bytearray(data))
         except:
@@ -1144,10 +1147,10 @@ class BreakAndExec():
         inactive breakpoints different from protected_bp, it will assign the hardware
         breakpoints to the most recently added breakpoints, and request to set active
         breakpoints into flash, if they not there already. The reserved argument states
-        how many HWBPs should be reserved for single- or range-stepping. the argument protected_bp
+        how many HWBPs should be reserved for single- or range-stepping. The argument protected_bp
         is set by single and range-stepping, when we start at a place where there is a
         software breakpoint set. In this case, we do a single-step and then wait for
-        GDB to re-actoivate the BP.
+        GDB to re-activate the BP.
         The method will return False when at least one BP cannot be activated due
         to resource restrictions (e.g., not enough HWBPs).
         """
@@ -1202,7 +1205,7 @@ class BreakAndExec():
     def remove_inactive_and_deallocate_forbidden_bps(self, reserved, protected_bp):
         """
         Remove all inactive BPs and deallocate BPs that are forbidden
-        (after changing BP preference). A protected BP is not deleted!
+        (after changing BP preference). A protected SW BP is not deleted!
         These are BPs at the current PC that have been set before and
         will now be overstepped in a single-step action.
         Return False if a non-existent HWBP shall be cleared.
@@ -1233,7 +1236,7 @@ class BreakAndExec():
                 self._hw[bp['hwbp']] = None
                 bp['hwbp'] = None
             # check for protected BP
-            if a == protected_bp:
+            if a == protected_bp and bp['inflash']:
                 self.logger.debug("BP at 0x%X is protected", a)
                 continue
             # delete BP
@@ -1257,7 +1260,7 @@ class BreakAndExec():
 
     def cleanup_breakpoints(self):
         """
-        Remove all breakpoints from flash
+        Remove all breakpoints from flash and clear hardware breakpoints
         """
         self.logger.info("Deleting all breakpoints ...")
         self._hw = [-1] + [None for x in range(self._hwbps)]
@@ -1298,13 +1301,13 @@ class BreakAndExec():
             self.dbg.run()
         return None
 
-    #pylint: disable=too-many-return-statements, too-many-statements
+    #pylint: disable=too-many-return-statements, too-many-statements, too-many-branches
     def single_step(self, addr, fresh=True):
         """
         Perform a single step. If at the current location, there is a software breakpoint,
         we simulate a two-word instruction or ask the hardware debugger to do a single step
         if it is a one-word instruction. The simulation saves two flash reprogramming operations.
-        If mon._safe is true, it means that we will make every effort to not end up in the
+        Otherwise, if mon._safe is true, it means that we will try to not end up in the
         interrupt vector table. For all straight-line instructions, we will use the hardware
         breakpoint to break after one step. If an interrupt occurs, we may break in the ISR,
         if there is a breakpoint, or we will not notice it at all. For all remaining instruction
@@ -1321,7 +1324,7 @@ class BreakAndExec():
         self.logger.debug("One single step at 0x%X", addr)
         opcode = self._read_filtered_flash_word(addr)
         if opcode == BREAKCODE: # this should not happen!
-            self.logger.debug("Stopping execution in 'single-step' because of BREAK instruction")
+            self.logger.error("Stopping execution in 'single-step' because of BREAK instruction")
             return SIGILL
         if opcode == SLEEPCODE: # ignore sleep
             self.logger.debug("Ignoring sleep in 'single-step'")
@@ -1329,23 +1332,31 @@ class BreakAndExec():
             self.dbg.program_counter_write(addr>>1)
             return SIGTRAP
         if self.mon.is_old_exec():
+            self.logger.debug("Single step in old execution mode")
             self.dbg.step()
             return SIGTRAP
         if not self.update_breakpoints(1, addr):
+            self.logger.debug("Not enough free HW BPs: SIGABRT")
             return SIGABRT
-        # if there is a two word instruction and
-        # a SWBP at the place where we want to step, simulate!
-        if (addr in self._bp and self._bp[addr]['inflash']
-                and self.two_word_instr(self._bp[addr]['opcode'])):
-            self.logger.debug("Two-word instruction at SWBP")
-            addr = self.sim_two_word_instr(self._bp[addr]['opcode'],
-                                               self._bp[addr]['secondword'], addr)
-            self.logger.debug("New PC(byte addr)=0x%X, return SIGTRAP", addr)
-            self.dbg.program_counter_write(addr>>1)
+        # If there is a SWBP at the place where we want to step,
+        # use the internal single-step (which will execute the instruction offline)
+        # or, if a two-word instruction, simulate the step.
+        if addr in self._bp and self._bp[addr]['inflash']:
+            if self.two_word_instr(self._bp[addr]['opcode']):
+            # if there is a two word instruction, simulate
+                self.logger.debug("Two-word instruction at SWBP: simulate")
+                addr = self.sim_two_word_instr(self._bp[addr]['opcode'],
+                                                self._bp[addr]['secondword'], addr)
+                self.logger.debug("New PC(byte addr)=0x%X, return SIGTRAP", addr)
+                self.dbg.program_counter_write(addr>>1)
+                return SIGTRAP
+            # one-word instructions are handled by offline execution in the OCD
+            self.logger.debug("One-word instruction at SWBP: offline execution in OCD")
+            self.dbg.step()
             return SIGTRAP
         # if stepping is unsafe, just use the AVR stepper
         if not self.mon.is_safe():
-            self.logger.debug("Use AVR stepper, return SIGTRAP")
+            self.logger.debug("Unsafe Single-stepping: use AVR stepper, return SIGTRAP")
             self.dbg.step()
             return SIGTRAP
         # now we have to do the dance using the HWBP or masking the I-bit
@@ -1361,7 +1372,7 @@ class BreakAndExec():
             destination = self.compute_destination_of_ibranch(opcode, ibit, addr)
             self.logger.debug("Branching on I-Bit. Destination=0x%X", destination)
         if destination is not None:
-            self.logger.debug("Run to cursor..., return None")
+            self.logger.debug("Run to cursor... at 0x%X, return None", destination)
             self.dbg.run_to(destination)
             return None
         # for the remaining branch instructions,
@@ -1416,7 +1427,7 @@ class BreakAndExec():
             return self.single_step(None)
         if (addr in self._range_exit or # starting at possible exit point inside range
             self._read_filtered_flash_word(addr) in { BREAKCODE, SLEEPCODE } or # special opcode
-            addr in self._bp or # a protected bp at this point
+            addr in self._bp or # a SWBP at this point
             new_range): # or it is a new range
             return self.single_step(None, fresh=False) # reduce to one step!
         if len(self._range_exit) == reservehwbps: # we can cover all exit points!

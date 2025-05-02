@@ -112,13 +112,11 @@ class TestBreakAndExec(TestCase):
         self.bp.update_breakpoints(1, 300)
         self.assertEqual(self.bp._bp, {100: { 'active': True, 'inflash': True, 'hwbp' : None,
                                         'opcode': BREAKCODE, 'secondword' : 0x1111, 'timestamp' : 2 },
-                                        300:  { 'active': False, 'inflash': True, 'hwbp' : None,
-                                        'opcode': 0x2222, 'secondword' : 0x3332, 'timestamp' : 1 },
                                         400:  { 'active': True, 'inflash': True, 'hwbp' : None,
                                         'opcode': 0x2223, 'secondword' : 0x3333, 'timestamp' : 3 }})
         self.assertEqual(self.bp._hw, [-1, None ])
         self.bp.dbg.software_breakpoint_clear.assert_called_with(200)
-        self.bp.dbg.software_breakpoint_set.assert_has_calls([call(100), call(300), call(400)], any_order=True)
+        self.bp.dbg.software_breakpoint_set.assert_has_calls([call(100), call(400)], any_order=True)
 
     def test_update_breakpoints_update_remove_stealhwbp(self):
         self.maxDiff = None
