@@ -440,6 +440,6 @@ The following text is copied verbatim from the README of pyedbglib. The udev rul
 
 ## What the future has in store for us
 
-The script has all the basic functionality and seems to work pretty well.
+The script has now its full functionality and seems to work pretty well. It has also been integrated into MiniCore, MicroCore and my fork of ATTinyCore.
 
-I also plan to provide binaries, which can be used as tools for the Arduino IDE 2. And if it all works, it is only a "tiny" step to generalize it to the JTAG and/or UPDI AVR MCUs. So, stay tuned.
+Now, it is only a "tiny" step to generalize it to the JTAG and UPDI AVR MCUs. So, stay tuned. Before working on that, I plan to deploy a test battery on the GDB/arduino-cli level, however.
