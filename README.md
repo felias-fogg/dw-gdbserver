@@ -1,6 +1,6 @@
 #  dw-gdbserver
 
-This Python script acts as a [gdbserver](https://sourceware.org/gdb/current/onlinedocs/gdb.html/Server.html#Server) for [*debugWIRE*](https://debugwire.de) MCUs, e.g., for the ATmega328P.  It can communicate with Microchip debuggers such as [Atmel-ICE](https://www.microchip.com/en-us/development-tool/atatmel-ice) and [MPLAB SNAP](https://www.microchip.com/en-us/development-tool/pg164100) (in AVR mode), and it provides a pass-through service for the DIY hardware debugger [dw-link](https://github.com/felias-fogg/dw-link). For Microchip debuggers, the Python script uses the infrastructure provided by [pymcuprog](https://github.com/microchip-pic-avr-tools/pymcuprog) and [pyedgblib](https://github.com/microchip-pic-avr-tools/pyedbglib) to implement a full-blown gdbserver. With dw-gdbserver, you can utilize the GDB debuggers integrated into IDEs such as Arduino IDE 2 or PlatformIO.
+This Python script serves as a gdbserver for debugWIRE MCUs, such as the ATmega328P.  It can communicate with Microchip debuggers such as [Atmel-ICE](https://www.microchip.com/en-us/development-tool/atatmel-ice) and [MPLAB SNAP](https://www.microchip.com/en-us/development-tool/pg164100) (in AVR mode), and it provides a pass-through service for the DIY hardware debugger [dw-link](https://github.com/felias-fogg/dw-link). For Microchip debuggers, the Python script uses the infrastructure provided by [pymcuprog](https://github.com/microchip-pic-avr-tools/pymcuprog) and [pyedgblib](https://github.com/microchip-pic-avr-tools/pyedbglib) to implement a full-blown gdbserver. With dw-gdbserver, you can utilize the debug interfaces integrated into IDEs such as Arduino IDE 2 or PlatformIO.
 
 - [Switching SNAP and PICkit4 to AVR mode](#switching-snap-and-pickit4-to-avr-mode)
 - [Installation](#installation)
@@ -12,6 +12,7 @@ This Python script acts as a [gdbserver](https://sourceware.org/gdb/current/onli
 - [Usage](#usage)
   * [Command line options](#command-line-options)
   * [How to get into and out of debugWIRE mode](#how-to-get-into-and-out-of-debugwire-mode)
+  * [Restoring an Arduino Uno R3 to its original state after debugging](#restoring-an-arduino-uno-r3-to-its-original-state-after-debugging)
   * [Monitor commands](#monitor-commands)
 - [Integrated Development Environments and Graphical User Interfaces](#integrated-development-environments-and-graphical-user-interfaces)
   * [Arduino IDE 2](#arduino-ide-2)
@@ -28,7 +29,7 @@ This Python script acts as a [gdbserver](https://sourceware.org/gdb/current/onli
     + [ATtiny (covered by MicroCore)](#attiny--covered-by-microcore-)
     + [ATtinys (covered by the ATTinyCore)](#attinys--covered-by-the-attinycore-)
     + [ATmegas (covered by MiniCore)](#atmegas--covered-by-minicore-)
-    + [Other ATmegas](#other-atmegas)
+    + [Other ATmegas:](#other-atmegas)
 - [Notes for Linux systems](#notes-for-linux-systems)
 - [What the future has in store for us](#what-the-future-has-in-store-for-us)
 
@@ -111,9 +112,7 @@ After that, you find an executable `dw-gdbserver` (or `dw-gdbserver.exe`) in the
 
 ## Usage
 
-If your target board is an Arduino board, you [must modify it by disconnecting the capacitor responsible for the auto-reset feature](https://debugwire.de/board-modifications/).
-
-Once you have [connected a hardware debugger to your target board](#connecting-a-debugwire-debugger-to-a-target), you can start the  gdbserver in a terminal window.
+If your target board is an Arduino board, you [must modify it by disconnecting the capacitor responsible for the auto-reset feature](https://debugwire.de/board-modifications/). Of course, also on other boards, you need to remove any capacitive load on the RESET line. Once you have done that and you [connected a hardware debugger to your target board](#connecting-a-debugwire-debugger-to-a-target), you can start the  gdbserver in a terminal window.
 
 ```
 > dw-gdbserver -d atmega328p
@@ -170,7 +169,19 @@ If, instead of using a CLI, you want to use an IDE (e.g., Arduino IDE 2) or GUI,
 
 ### How to get into and out of debugWIRE mode
 
-When the MCU is not already in debugWIRE mode,  you must request the switch to debugWIRE mode using the command `monitor debugwire enable` in GDB. The debugger will then enable the DWEN fuse and either power-cycles the target by itself (if possible) or ask you to power-cycle the target system. Once this is done, the chip will stay in debugWIRE mode, even after terminating the debugging session. In other words, when starting the next debug session, the MCU is already in debugWIRE mode. You can switch back to normal mode using the command `monitor debugwire disable` before leaving the debugger.
+When the MCU is not already in debugWIRE mode,  you must request the switch to debugWIRE mode using the command `monitor debugwire enable` in GDB. The debugger will then enable the DWEN fuse and either power-cycles the target by itself (if possible) or ask you to power-cycle the target system. Once this is done, the chip will stay in debugWIRE mode, even after terminating the debugging session. In other words, when starting the next debug session, the MCU is already in debugWIRE mode.
+
+You can switch back to normal mode using the command `monitor debugwire disable` before leaving the debugger. Inside the Arduino IDE 2 with the ATTinyCore, MiniCore, or MicroCore, you can instead just use the `Burn Bootloader` command in the `Tools` menu. The is switch back the MCU to normsal mode and burn the right fudses and the bootloader of this core.
+
+### Restoring an Arduino Uno R3 to its original state after debugging
+
+If, after debugging, you want to restore an Arduino Uno or similar board to its original state, two things have to be done:
+
+1. You need to enable the RESET capacitor again, either by closing the opened solder bridge or by reinserting the removed capacitor. My advice is not to do that, but mark the board instead for debug use only.  In this case, you can also ignore step 2. Another possibility is to leave out the capacitor and use a manual reset just before avrdude starts the upload.
+
+2. You need to reflash the bootloader and set the right fuses. In the Arduino IDE, you can do this by using the `Burn Bootloader` command in the `Tools` menu. Note that when using MiniCore, this means that the *urboot* bootloader is installed. In other words, you then need to use MiniCore when programming the board.
+
+   If you want to reinstall the original Optiboot bootloader, you have to select `Arduino Uno` as the board under the `Tools` menu and have to use either `Arduino as ISP` or any other simple ISP programmer, e.g.,  USBasp or USBtinyISP, for flashing the bootloader.
 
 ### Monitor commands
 
@@ -220,6 +231,13 @@ PlatformIO is a cross-platform, cross-architecture, multiple framework professio
 [platformio]
 default_envs = debug
 
+[env:atmega328p]
+platform = atmelavr
+framework = arduino
+board = ATmega328P
+board_build.f_cpu = 16000000L
+board_hardware.oscillator = external
+
 [env:debug]
 extends = env:atmega328p              ;; <--- substitute the right board here
 build_type = debug
@@ -242,19 +260,11 @@ debug_init_cmds =
 debug_build_flags =
     -Og
     -ggdb3
-
-[env:atmega328p]
-platform = atmelavr
-framework = arduino
-board = ATmega328P
-board_build.f_cpu = 16000000L
-board_hardware.oscillator = external
-
 ```
 
 Note that the debug environment should be the default one. It should be the first if no default environment has been declared.
 
-I further noticed that the avr-gdb debugger in the PlatformIO toolchain is quite dated and often does not start (e.g. under Ubuntu 24.04). Simply replace it with a more recent version from /usr/bin or /usr/local/bin, perhaps after haing it installed with you local packet manager.
+I further noticed that the avr-gdb debugger in the PlatformIO toolchain is quite dated and does not start (e.g. under Ubuntu 24.04 and macOS 15.5). Simply replace it with a more recent version from /usr/bin or /usr/local/bin, perhaps after having it installed with you local packet manager. The location where PlatformIO stores its copy of avr-gdb is `~/.platformio/packages/toolchain-atmelavr/` , where the tilde symbol signifies the home directory of the user.
 
 ### Gede
 
@@ -382,7 +392,7 @@ This is the list of all debugWIRE MCUs, which should all be compatible with dw-g
 
 The ATmega48 and ATmega88 (without the A-suffix) sitting on my desk suffer from stuck-at-one bits in the program counter and are, therefore, not debuggable by GDB. I suspect that this applies to all chips labeled this way. In any case, the test for stuck-at-one-bits is made when connecting to the chips.
 
-#### Other ATmegas:
+#### Other ATmegas
 
 * ATmega8U2, ATmega16U2, ATmega32U2
 * ATmega32C1, ATmega64C1, ATmega16M1, ATmega32M1, ATmega64M1, ATmegaHVE2
