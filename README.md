@@ -29,7 +29,7 @@ This Python script serves as a gdbserver for debugWIRE MCUs, such as the ATmega3
     + [ATtiny (covered by MicroCore)](#attiny--covered-by-microcore-)
     + [ATtinys (covered by the ATTinyCore)](#attinys--covered-by-the-attinycore-)
     + [ATmegas (covered by MiniCore)](#atmegas--covered-by-minicore-)
-    + [Other ATmegas:](#other-atmegas)
+    + [Other ATmegas](#other-atmegas)
 - [Notes for Linux systems](#notes-for-linux-systems)
 - [What the future has in store for us](#what-the-future-has-in-store-for-us)
 
@@ -395,12 +395,12 @@ The ATmega48 and ATmega88 (without the A-suffix) sitting on my desk suffer from 
 #### Other ATmegas
 
 * ATmega8U2, ATmega16U2, ATmega32U2
-* ATmega32C1, ATmega64C1, ATmega16M1, ATmega32M1, ATmega64M1, ATmegaHVE2
+* ATmega32C1, ATmega64C1, ATmega16M1, ATmega32M1, ATmega64M1
 * AT90USB82, AT90USB162
 * AT90PWM1, AT90PWM2B, AT90PWM3B
 * AT90PWM81, AT90PWM161
 * AT90PWM216, AT90PWM316
-* ATmega8HVA, ATmega16HVA, ATmega16HVB, ATmega32HVA, ATmega32HVB, ATmega64HVE2
+* ATmega8HVA, ATmega16HVA, ATmega16HVB, ATmega32HVB, ATmega64HVE2
 
 ## Notes for Linux systems
 

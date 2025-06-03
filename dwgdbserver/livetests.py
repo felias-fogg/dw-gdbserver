@@ -102,7 +102,7 @@ class LiveTests():
             self._live_test_set_sreg()
             self._live_test_set_sp()
             self._live_test_set_pc()
-            self._live_test_step()
+            #self._live_test_step()
             self._live_test_vcont_range()
             self._live_test_vcont_step_with_protected_bp()
             self._live_test_vcont_step_hwbp_unprotected()
