@@ -77,7 +77,7 @@ class LiveTests():
         self.mon.set_default_state()
         self.success = 0
         self.failure = 0
-        self.tests_total = 26
+        self.tests_total = 27
         try:
             self.handler.send_debug_message("Running live tests ...")
             self.logger.info("Starting live tests (will clobber SRAM and flash)")
@@ -102,9 +102,10 @@ class LiveTests():
             self._live_test_set_sreg()
             self._live_test_set_sp()
             self._live_test_set_pc()
-            #self._live_test_step()
+            self._live_test_step()
             self._live_test_vcont_range()
             self._live_test_vcont_step_with_protected_bp()
+            self._live_test_vcont_step_with_old_exec()
             self._live_test_vcont_step_hwbp_unprotected()
             self._live_test_v_flash_erase_clean_bps()
             self._live_test_load_clean_bps()
@@ -387,19 +388,22 @@ class LiveTests():
         self.logger.debug("regs=%s", self.dbg.sram_read(16, 3))
         self.logger.debug("mem=%s", self.dbg.sram_read(self.sram_start, 1))
         self.handler.dispatch('S', b'05;01b2')
+        time.sleep(0.1)
         self.handler.poll_events()
         send1 = self.send_string
+        self.logger.debug("Send1: %s", self.send_string)
         self.send_string = ""
-        self.logger.debug("Sending: %s", self.send_string)
         self.handler.dispatch('s', b'')
+        time.sleep(0.1)
         self.handler.poll_events()
         send2 = self.send_string
+        self.logger.debug("Send2: %s", self.send_string)
         self.send_string = ""
-        self.logger.debug("Sending: %s", self.send_string)
         self.handler.dispatch('s', b'')
+        time.sleep(0.1)
         self.handler.poll_events()
         send3 = self.send_string
-        self.logger.debug("Sending: %s", self.send_string)
+        self.logger.debug("Send3: %s", self.send_string)
         self.logger.debug("PC=%0X", self.dbg.program_counter_read() << 1)
         self.logger.debug("regs=%s", self.dbg.sram_read(16, 3))
         self.logger.debug("mem=%s", self.dbg.sram_read(self.sram_start, 1))
@@ -443,7 +447,7 @@ class LiveTests():
         self.handler.dispatch("Z", b"1,1b2,2")
         self.handler.dispatch("Z", b"1,1b4,2")
         self.mon._cache = False
-        opc1 = self.mem.flash_read_word(0x1b4)
+        opc1 = self.mem.flash_read_word(0x1b2)
         self.logger.debug("Opcode before 'continue': 0x%X", opc1)
         self.send_string = ""
         self.handler.dispatch("vCont", b";c")
@@ -463,6 +467,8 @@ class LiveTests():
         self.logger.debug("Opcode before 'step': 0x%X", opc4)
         self.send_string = ""
         self.handler.dispatch("vCont", b";s")
+        time.sleep(0.1)
+        self.handler.poll_events()
         send2 = self.send_string
         self.logger.debug("Result of 'step': %s", send2)
         opc5 = self.mem.flash_read_word(0x1b2)
@@ -473,12 +479,69 @@ class LiveTests():
         self.check_result(self.dbg.program_counter_read() == (0x1b4 >> 1) and
                               send1 == "T0520:87;21:3400;22:b2010000;thread:1;" and
                               send2 == "T0520:87;21:3400;22:b4010000;thread:1;" and
-                              opc1 == 0x9320 and opc2 == 0x9598 and
+                              opc1 == 0xe429 and opc2 == 0x9598 and
                               opc3 == opc2 and opc4 == opc2 and opc5 == opc2 and
                               opc6 == opc2)
         self.mon._cache = True
         self.bp.cleanup_breakpoints()
         self.mon._onlyswbps = False
+
+    def _live_test_vcont_step_with_old_exec(self):
+        self.logger.info("Running 'vcont step' test using old exec forcing 2xflashing ...")
+        self.mon._onlyswbps = True
+        self.mon._old_exec = True
+        self.dbg.program_counter_write(0x1aa >> 1)
+        self.dbg.stack_pointer_write(bytearray([0x34, 0x00]))
+        self.dbg.status_register_write(bytearray([0x87]))
+        self.handler.dispatch("Z", b"1,1ac,2")
+        self.handler.dispatch("Z", b"1,1ae,2")
+        self.mon._cache = False
+        opc1 = self.mem.flash_read_word(0x1ac)
+        self.logger.debug("Opcode before 'continue' opc1=0x%X", opc1)
+        self.send_string = ""
+        self.handler.dispatch("vCont", b";c")
+        time.sleep(0.1)
+        self.handler.poll_events()
+        send1 = self.send_string
+        self.dbg.stop() # in order to stop a runaway!
+        self.logger.debug("Result of 'continue' send1=%s", send1)
+        opc2 = self.mem.flash_read_word(0x1ac)
+        self.logger.debug("Opcode after 'continue' opc2=0x%X", opc2)
+        self.handler.dispatch("z", b"1,1ac,2")
+        self.handler.dispatch("z", b"1,1ae,2")
+        opc3 = self.mem.flash_read_word(0x1ac)
+        self.logger.debug("Opcode after 'delete BP'  opc3=0x%X", opc3)
+        self.handler.dispatch("Z", b"1,1ae,2")
+        opc4 = self.mem.flash_read_word(0x1ac)
+        self.logger.debug("Opcode before 'step'  opc4=0x%X", opc4)
+        self.send_string = ""
+        self.handler.dispatch("vCont", b";s")
+        time.sleep(0.1)
+        self.handler.poll_events()
+        send2 = self.send_string
+        self.logger.debug("Result of 'step' send2=%s", send2)
+        opc5 = self.mem.flash_read_word(0x1ac)
+        self.logger.debug("Opcode after 'step' opc5=0x%X", opc5)
+        self.handler.dispatch("z", b"1,1ae,2")
+        self.handler.dispatch("Z", b"1,1ac,2")
+        self.handler.dispatch("vCont", b";s")
+        time.sleep(0.1)
+        self.handler.poll_events()
+        send3 = self.send_string
+        self.logger.debug("Result of 'step' send3=%s", send3)
+        opc6 = self.mem.flash_read_word(0x1ac)
+        self.logger.debug("Opcode after 'insert BP' & step: opc6=0x%X", opc6)
+        self.check_result(self.dbg.program_counter_read() == (0x1b0 >> 1) and
+                              send1 == "T0520:87;21:3400;22:ac010000;thread:1;" and
+                              send2 == "T0520:87;21:3400;22:ae010000;thread:1;" and
+                              send3 == "T0520:87;21:3400;22:b0010000;thread:1;" and
+                              opc1 == 0x0000 and opc2 == 0x9598 and
+                              opc3 == 0x9598 and opc4 == 0x9598 and opc5 == 0x0000 and
+                              opc6 == 0x9598)
+        self.mon._cache = True
+        self.mon._old_exec = False
+        self.mon._onlyswbps = False
+        self.dbg.device.avr.protocol.software_breakpoint_clear_all()
 
     def _live_test_vcont_step_hwbp_unprotected(self):
         self.logger.info("Running 'vcont step' test with unprotected HWBP...")
@@ -490,9 +553,14 @@ class LiveTests():
         time.sleep(0.1)
         self.handler.poll_events()
         self.logger.debug("HWBP after stopping: %s", self.bp._hw[1])
+        self.logger.debug("Breakpoint at 0x1b2 after stopping: %s", self.bp._bp.get(0x1b2,None))
         hw1 = self.bp._hw[1]
+        self.handler.dispatch("z", b"1,1b2,2")
         self.handler.dispatch("vCont", b";s")
+        time.sleep(0.1)
+        self.handler.poll_events()
         self.logger.debug("HWBP after single-step: %s", self.bp._hw[1])
+        self.logger.debug("Breakpoint at 0x1b2 after step: %s", self.bp._bp.get(0x1b2,None))
         hw2 = self.bp._hw[1]
         self.check_result(hw1 == 0x1b2 and hw2 is None)
 

@@ -1,5 +1,11 @@
 # Changelog
 
+### V2.2.2 (14-June-2025)
+
+- Added: Live tests that check that protected SW BPs and unprotected HW BPs work correctly.
+- Added: Live test added to check that old-style execution does indeed lead to twice reprogramming a flash page at each breakpoint hit
+- Fixed: Moved "BREAK" recognition in single-step after branching to old-style execution because otherwise execution would not proceed.
+
 ### v2.2.1 (2-May-2025)
 
 - Changed: HW BPs will no longer be protected (when doing a single step). While protecting an HW BP is not wrong, it is unnecessary. Further, it implies you cannot run the debugger with only one HW BP in HWBP-only mode.

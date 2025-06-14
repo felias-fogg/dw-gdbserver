@@ -1323,9 +1323,6 @@ class BreakAndExec():
             addr = self.dbg.program_counter_read() << 1
         self.logger.debug("One single step at 0x%X", addr)
         opcode = self._read_filtered_flash_word(addr)
-        if opcode == BREAKCODE: # this should not happen!
-            self.logger.error("Stopping execution in 'single-step' because of BREAK instruction")
-            return SIGILL
         if opcode == SLEEPCODE: # ignore sleep
             self.logger.debug("Ignoring sleep in 'single-step'")
             addr += 2
@@ -1335,6 +1332,9 @@ class BreakAndExec():
             self.logger.debug("Single step in old execution mode")
             self.dbg.step()
             return SIGTRAP
+        if opcode == BREAKCODE: # this should not happen!
+            self.logger.error("Stopping execution in 'single-step' because of BREAK instruction")
+            return SIGILL
         if not self.update_breakpoints(1, addr):
             self.logger.debug("Not enough free HW BPs: SIGABRT")
             return SIGABRT
