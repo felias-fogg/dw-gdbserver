@@ -171,7 +171,7 @@ If, instead of using a CLI, you want to use an IDE (e.g., Arduino IDE 2) or GUI,
 
 When the MCU is not already in debugWIRE mode,  you must request the switch to debugWIRE mode using the command `monitor debugwire enable` in GDB. The debugger will then enable the DWEN fuse and either power-cycles the target by itself (if possible) or ask you to power-cycle the target system. Once this is done, the chip will stay in debugWIRE mode, even after terminating the debugging session. In other words, when starting the next debug session, the MCU is already in debugWIRE mode.
 
-You can switch back to normal mode using the command `monitor debugwire disable` before leaving the debugger. Inside the Arduino IDE 2 with the ATTinyCore, MiniCore, or MicroCore, you can instead just use the `Burn Bootloader` command in the `Tools` menu. The is switch back the MCU to normsal mode and burn the right fudses and the bootloader of this core.
+You can switch back to normal mode using the command `monitor debugwire disable` before leaving the debugger. Inside the Arduino IDE 2 with the ATTinyCore, MiniCore, or MicroCore, you can instead just use the `Burn Bootloader` command in the `Tools` menu. The will switch back the MCU to normsal mode and burn the right fudses and the bootloader of this core.
 
 ### Restoring an Arduino Uno R3 to its original state after debugging
 
@@ -198,7 +198,7 @@ In addition to the above mentioned command for enabling debugWIRE mode, there ar
 | `monitor onlyloaded` [`enable`\|`disable`]            | Execution is only possible when a `load` command was previously executed, which is the default. If you want to start execution without previously loading an executable, you need to disable this mode. |
 | `monitor rangestepping `[`enable`\|`disable`]         | The GDB range-stepping command is supported or disabled.     |
 | `monitor reset`                                       | Resets the MCU.                                              |
-| `monitor singlestep` [`safe`\|`interruptible`]        | Single-stepping can either be performed in a *safe* way, where single steps are shielded against interrupts or in the default way, where a single step can lead to a jump into the interrupt dispatch table. The *safe* option is the default. |
+| `monitor singlestep` [`safe`\|`interruptible`]        | Single-stepping can either be performed in a *safe* way, where single steps are shielded against interrupts or in a way, where a single step can lead to a jump into the interrupt dispatch table. The *safe* option is the default. |
 | `monitor timer` [`freeze`\|`run`]                     | Timers can either be *frozen* when execution is stopped, or they can *run* freely. The later option is helpful when PWM output is crucial. |
 | `monitor verify` [`enable`\|`disable`]                | Verify flash after loading each flash page. The cost for verifying is negligible, and doing so might diagnose flash wear problems. The default is that this option is *enabled*. |
 | `monitor version`                                     | Show version of the gdbserver.                               |
@@ -280,7 +280,7 @@ Clicking on OK, you start a debugging session. The startup may take a while beca
 
 ## Connecting a debugWIRE debugger to a target
 
-In principle, only two lines are necessary to connect your hardware debugger to a target chip or board: the debugWIRE line, which is the target chip's RESET line, and GND. However, when one wants to change into and out of debugWIRE mode, change fuses, or upload firmware, it is necessary to connect all 6 SPI programming lines to the target: VTG, GND, RESET, MOSI, MISO, and SCK. For this reason, using all SPI programming lines makes a lot of sense. Moreover, most of the time, an SPI connector is already on the target board.
+In principle, only two wires are necessary to connect your hardware debugger to a target chip or board: the debugWIRE line, which is the target chip's RESET line, and GND. However, when one wants to change into and out of debugWIRE mode, change fuses, or upload firmware, it is necessary to connect all 6 SPI programming lines to the target: VTG, GND, RESET, MOSI, MISO, and SCK. For this reason, using all SPI programming lines makes a lot of sense. Moreover, most of the time, an SPI connector is already on the target board.
 
 ### SPI programming header
 
@@ -340,7 +340,7 @@ When you want to connect a **dw-link** debugger without a dw-link probe shield t
 | 5V (if powered by debugger) | Vcc        | 2       |
 | GND                         | GND        | 6       |
 
-With a dw-link probe shield, it is best to construct or buy a cable with a 6-pin SPI programming plug on one end and single DuPont pins on the other.
+With a dw-link probe shield, it is best to construct or buy a cable with a 6-pin SPI programming plug on one end and single Dupont pins on the other.
 
 ### Powering the target board
 
