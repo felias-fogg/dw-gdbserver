@@ -171,7 +171,7 @@ If, instead of using a CLI, you want to use an IDE (e.g., Arduino IDE 2) or GUI,
 
 When the MCU is not already in debugWIRE mode,  you must request the switch to debugWIRE mode using the command `monitor debugwire enable` in GDB. The debugger will then enable the DWEN fuse and either power-cycles the target by itself (if possible) or ask you to power-cycle the target system. Once this is done, the chip will stay in debugWIRE mode, even after terminating the debugging session. In other words, when starting the next debug session, the MCU is already in debugWIRE mode.
 
-You can switch back to normal mode using the command `monitor debugwire disable` before leaving the debugger. Inside the Arduino IDE 2 with the ATTinyCore, MiniCore, or MicroCore, you can instead just use the `Burn Bootloader` command in the `Tools` menu. The will switch back the MCU to normsal mode and burn the right fudses and the bootloader of this core.
+You can switch back to normal mode using the command `monitor debugwire disable` before leaving the debugger. Inside the Arduino IDE 2 with the ATTinyCore, MiniCore, or MicroCore, you can instead just use the `Burn Bootloader` command in the `Tools` menu. This will switch back the MCU to normal mode and burn the right fuses and the bootloader of this core.
 
 ### Restoring an Arduino Uno R3 to its original state after debugging
 
