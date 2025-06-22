@@ -102,7 +102,7 @@ With that, you can start executing the script inside the downloaded folder as fo
 > poetry run dw-gdbserver ...
 ```
 
-Furthermore, you can create a binary standalone package as follows:
+Furthermore, you can create a binary standalone package as follows (after having installed the pyinstaller package):
 
 ```
 > poetry run pyinstaller dw-gdbserver.spec
