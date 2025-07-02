@@ -2,6 +2,8 @@
 
 This Python script serves as a gdbserver for debugWIRE MCUs, such as the ATmega328P.  It can communicate with Microchip debuggers such as [Atmel-ICE](https://www.microchip.com/en-us/development-tool/atatmel-ice) and [MPLAB SNAP](https://www.microchip.com/en-us/development-tool/pg164100) (in AVR mode), and it provides a pass-through service for the DIY hardware debugger [dw-link](https://github.com/felias-fogg/dw-link). For Microchip debuggers, the Python script uses the infrastructure provided by [pymcuprog](https://github.com/microchip-pic-avr-tools/pymcuprog) and [pyedgblib](https://github.com/microchip-pic-avr-tools/pyedbglib) to implement a full-blown gdbserver. With dw-gdbserver, you can utilize the debug interfaces integrated into IDEs such as Arduino IDE 2 or PlatformIO.
 
+So, why another open-source gdbserver? The main intention behind it is to provide a gdbserver that is easily installable on Linux, macOS, and Windows. In addition,it provides some enhancements over its competitors (see https://arduino-craft-corner.de/index.php/2025/05/05/stop-and-go/ and https://arduino-craft-corner.de/index.php/2025/03/19/interrupted-and-very-long-single-steps/).
+
 - [Switching SNAP and PICkit4 to AVR mode](#switching-snap-and-pickit4-to-avr-mode)
 - [Installation](#installation)
   * [Installation by downloading binaries](#installation-by-downloading-binaries)
