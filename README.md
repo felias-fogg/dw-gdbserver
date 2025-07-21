@@ -171,7 +171,7 @@ If, instead of using a CLI, you want to use an IDE (e.g., Arduino IDE 2) or GUI,
 
 ### How to get into and out of debugWIRE mode
 
-When the MCU is not already in debugWIRE mode,  you must request the switch to debugWIRE mode using the command `monitor debugwire enable` in GDB. The debugger will then enable the DWEN fuse and either power-cycles the target by itself (if possible) or ask you to power-cycle the target system. Once this is done, the chip will stay in debugWIRE mode, even after terminating the debugging session. In other words, when starting the next debug session, the MCU is already in debugWIRE mode.
+When the MCU is not already in debugWIRE mode,  you must request the switch to debugWIRE mode using the command `monitor debugwire enable` in GDB. The debugger will then enable the DWEN fuse and either power-cycles the target by itself (if possible) or ask you to power-cycle the target system. Once this is done, the chip will stay in debugWIRE mode, even after terminating the debugging session. In other words, when starting the next debug session, the MCU is already in debugWIRE mode. This also implies that you cannot upload binaries to the MCU in the usual way (using the SPI interface or a bootloader). Instead you have to use the GDB `load` command.
 
 You can switch back to normal mode using the command `monitor debugwire disable` before leaving the debugger. Inside the Arduino IDE 2 with the ATTinyCore, MiniCore, or MicroCore, you can instead just use the `Burn Bootloader` command in the `Tools` menu. This will switch back the MCU to normal mode and burn the right fuses and the bootloader of this core.
 
@@ -221,7 +221,7 @@ https://mcudude.github.io/MicroCore/package_MCUdude_MicroCore_index.json
 https://mcudude.github.io/MiniCore/package_MCUdude_MiniCore_index.json
 ```
 
-After that, you must install the respective cores, which enables you to debug almost all classic AVR chips that use the debugWIRE interface. And this is all! Now, you can press the debug button and start debugging. See, e.g., this [short tutorial](https://docs.arduino.cc/software/ide-v2/tutorials/ide-v2-debugger/) about debugging in the Arduino IDE 2 documentation.
+After that, you must install the respective cores, which enables you to debug almost all classic AVR chips that use the debugWIRE interface. And this is all! Now, you can press the debug button and start debugging. See, e.g., this [short tutorial](https://docs.arduino.cc/software/ide-v2/tutorials/ide-v2-debugger/) about debugging in the Arduino IDE 2 documentation. In contrast to this tutorial, you need to `Verify` the sketch before starting to debug. Uploading will take place when starting the debug session. Similarly, as long as you not have exited the debugWIRE state, after changing your source file, you must `Verify` and then start a debug session.
 
 Linux users may need to add a few udev rules. When you first start the Arduino IDE debugger and the hardware debuggers are not recognized, you will get a hint in the `gdb-server` window of how to set the udev rules. You simply have to execute dw-gdbserver once using the command line option `--install-udev-rules`. Instead, you can create a udev-rules file along the lines described below.
 
