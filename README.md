@@ -28,9 +28,9 @@ So, why another open-source gdbserver for AVR MCUs? The main intention behind it
 - [Supported devices](#supported-devices)
   * [Supported and tested hardware debuggers](#supported-and-tested-hardware-debuggers)
   * [Supported and tested MCUs](#supported-and-tested-mcus)
-    + [ATtiny (covered by MicroCore)](#attiny--covered-by-microcore-)
-    + [ATtinys (covered by the ATTinyCore)](#attinys--covered-by-the-attinycore-)
-    + [ATmegas (covered by MiniCore)](#atmegas--covered-by-minicore-)
+    + [ATtiny -- covered by MicroCore](#attiny----covered-by-microcore)
+    + [ATtinys -- covered by the ATTinyCore](#attinys----covered-by-the-attinycore)
+    + [ATmegas -- covered by MiniCore](#atmegas----covered-by-minicore)
     + [Other ATmegas](#other-atmegas)
 - [Notes for Linux systems](#notes-for-linux-systems)
 - [What the future has in store for us](#what-the-future-has-in-store-for-us)
@@ -40,7 +40,7 @@ So, why another open-source gdbserver for AVR MCUs? The main intention behind it
 
 ## Switching SNAP and PICkit4 to AVR mode
 
-Switching to AVR mode in the SNAP debugger is easily accomplished by using avrdude (>= Version 7.3):
+SNAP and PICkit4 need to be switched to AVR mode before they can be used with dw-gdbserver. Switching to AVR mode in the SNAP debugger is easily accomplished by using avrdude (>= Version 7.3):
 
 ```
 > avrdude -c snap_isp -Pusb -xmode=avr
@@ -368,11 +368,11 @@ Except for [dw-link](https://github.com/felias-fogg/dw-link), this list is copie
 
 This is the list of all debugWIRE MCUs, which should all be compatible with dw-gdbserver. MCUs tested with this Python script are marked bold. MCUs known not to work with the script are struck out. For the list of MCUs compatible with dw-link, you need to consult the [dw-link manual](https://github.com/felias-fogg/dw-link/blob/master/docs/manual.md).
 
-#### ATtiny (covered by MicroCore)
+#### ATtiny -- covered by MicroCore
 
 - **ATtiny13**
 
-#### ATtinys (covered by the ATTinyCore)
+#### ATtinys -- covered by the ATTinyCore
 
 * **ATtiny43U**
 * **ATtiny2313(A), ATtiny4313**
@@ -385,7 +385,7 @@ This is the list of all debugWIRE MCUs, which should all be compatible with dw-g
 * **ATtiny48, ATtiny88**
 * **ATtiny1634**
 
-#### ATmegas (covered by MiniCore)
+#### ATmegas -- covered by MiniCore
 
 * <s>__ATmega48__</s>, __ATmega48A__, __ATmega48PA__, ATmega48PB,
 * <s>__ATmega88__</s>, __ATmega88A__, __ATmega88PA__, Atmega88PB,

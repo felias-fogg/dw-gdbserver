@@ -873,6 +873,7 @@ class Memory():
         self._flash_page_size = self.dbg.memory_info.memory_info_by_name('flash')['page_size']
         self._flash_size = self.dbg.memory_info.memory_info_by_name('flash')['size']
         self._multi_buffer = self.dbg.device_info.get('buffers_per_flash_page',1)
+        self._masked_registers = self.dbg.device_info.get('masked_registers',[])
         self._multi_page_size = self._multi_buffer*self._flash_page_size
         self._sram_start = self.dbg.memory_info.memory_info_by_name('internal_sram')['address']
         self._sram_size = self.dbg.memory_info.memory_info_by_name('internal_sram')['size']
@@ -936,7 +937,7 @@ class Memory():
         iaddr = int(addr,16)
         self.logger.debug("Address section: %s",addr_section)
         if addr_section == "80": # ram
-            return(iaddr, self.dbg.sram_read, self.dbg.sram_write)
+            return(iaddr, self.sram_masked_read, self.dbg.sram_write)
         if addr_section == "81": # eeprom
             return(iaddr, self.dbg.eeprom_read, self.dbg.eeprom_write)
         if addr_section == "00": # flash
@@ -944,6 +945,29 @@ class Memory():
         self.logger.error("Illegal memtype in memory access operation at %s: %s",
                               addr, addr_section)
         return (0, lambda *x: bytes(), lambda *x: False)
+
+    def sram_masked_read(self, addr, size):
+        """
+        Read a chunk from SRAM but leaving  out any masked registers. In theory,
+        one could use the "Memory Read Masked" method of the AVR8 Generic protocol.
+        However, there is no Python method implemented that does that for you.
+        For this reason, we do it here step by step.
+        """
+        end = addr + size
+        data = bytearray()
+        for mr in sorted(self._masked_registers):
+            if mr >= end or addr >= end:
+                break
+            if mr < addr:
+                continue
+            if addr < mr:
+                data.extend(self.dbg.sram_read(addr, mr - addr))
+            data.append(0xFF)
+            addr = mr + 1
+        if addr < end:
+            data.extend(self.dbg.sram_read(addr, end - addr))
+        return data
+
 
     def flash_read(self, addr, size):
         """
@@ -2213,7 +2237,7 @@ class DebugWIRE():
         Since the implementation of ISP programming is somewhat funny, a few stop/start
         sequences and double reads are necessary.
         """
-        if read_target_voltage(self.dbg.housekeeper) < 1.0:
+        if read_target_voltage(self.dbg.housekeeper) < 1.5:
             raise FatalError("Target is not powered")
         self.logger.info("Try to connect using ISP")
         self.spidevice = NvmAccessProviderCmsisDapSpi(self.dbg.transport, self.dbg.device_info)
@@ -2445,7 +2469,7 @@ SUBSYSTEM=="usb", ATTRS{idVendor}=="03eb", ATTRS{idProduct}=="2180", MODE="0666"
             cmd = portcmd[0]
             args.port = int(cmd[cmd.index('gdb_port')+len('gdb_port'):])
 
-    # Setup logging
+    # set up logging
     if args.verbose:
         args.verbose = args.verbose.strip()
     if args.verbose.upper() in ["INFO", "WARNING", "ERROR", "CRITICAL"]:
@@ -2501,7 +2525,7 @@ SUBSYSTEM=="usb", ATTRS{idVendor}=="03eb", ATTRS{idProduct}=="2180", MODE="0666"
 
     if device.lower() not in dev_id:
         logger.critical("Device '%s' is not supported by dw-gdbserver", device)
-        sys.exit(1)
+        return 1
 
     if args.tool:
         args.tool = args.tool.strip()
@@ -2551,6 +2575,9 @@ SUBSYSTEM=="usb", ATTRS{idVendor}=="03eb", ATTRS{idProduct}=="2180", MODE="0666"
             logger.critical(("Perhaps you need to install the udev rules first:\n"
                              "'sudo %s --install-udev-rules'\n" +
                              "and then unplug and replug the debugger."), path_to_prog)
+
+    if no_hw_dbg_error or no_backend_error:
+        return 1
 
     logger.info("Starting dw-gdbserver")
     avrdebugger = XAvrDebugger(transport, device)

@@ -417,6 +417,9 @@ class LiveTests():
     # vCont;c, vCont;C, vCont;s, vCont;S covered already above
 
     def _live_test_vcont_range(self):
+        """
+        Testing the range step command
+        """
         self.logger.info("Running vcont range test ...")
         self.dbg.program_counter_write(0x1b2 >> 1)
         self.send_string = ""
@@ -439,6 +442,10 @@ class LiveTests():
                               send1.startswith("T05") and send2.startswith("T05"))
 
     def _live_test_vcont_step_with_protected_bp(self):
+        """
+        Testing the step command when there is a disabled SWBP at the current position.
+        This SWBP should not be removed in order to avoid superfluous reprogramming
+        """
         self.logger.info("Running 'vcont step' test with protected SWBP...")
         self.mon._onlyswbps = True
         self.dbg.program_counter_write(0x1c4 >> 1)
@@ -487,6 +494,10 @@ class LiveTests():
         self.mon._onlyswbps = False
 
     def _live_test_vcont_step_with_old_exec(self):
+        """
+        This test uses old-style execution in order to demonstrate that
+        this leads to reprogramming flash at each breakpoint hit.
+        """
         self.logger.info("Running 'vcont step' test using old exec forcing 2xflashing ...")
         self.mon._onlyswbps = True
         self.mon._old_exec = True
@@ -544,6 +555,10 @@ class LiveTests():
         self.dbg.device.avr.protocol.software_breakpoint_clear_all()
 
     def _live_test_vcont_step_hwbp_unprotected(self):
+        """
+        If the breakpoint at the current position is a hardware breakpoint,
+        we do not protect it! It will be deleted and (perhaps) later re-asserted
+        """
         self.logger.info("Running 'vcont step' test with unprotected HWBP...")
         self.dbg.program_counter_write(0x1c4 >> 1)
         self.dbg.stack_pointer_write(bytearray([0x34, 0x00]))

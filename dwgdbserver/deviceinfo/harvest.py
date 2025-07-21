@@ -454,6 +454,7 @@ def harvest_from_file(filename):
     buf_per_page = None
 
     memories = {}
+    masked = []
     for event, elem in xml_iter:
         if event == 'end':
             if elem.tag == 'device':
@@ -481,6 +482,8 @@ def harvest_from_file(filename):
                 hv_implementation = get_hv_implementation(elem)
                 ocd_rev = get_ocd_rev(elem)
                 ocd_base = get_ocd_base(elem)
+                if ocd_base and (int(ocd_base,16) + 0x20) not in masked:
+                    masked.append(int(ocd_base,16) + 0x20)
                 buf_per_page = get_buf_per_page(elem)
             if elem.tag == 'register':
                 if elem.attrib['name'].lower() in ['eear', 'eearl']:
@@ -494,6 +497,9 @@ def harvest_from_file(filename):
                     spmcsr_base = int(elem.attrib['offset'],16)
                 if elem.attrib['name'].lower() in ['osccal', 'osccal0', 'fosccal', 'sosccala']:
                     osccal_base = int(elem.attrib['offset'],16)
+                if elem.attrib.get('ocd-rw',"RW") in ["", "W"] \
+                   and int(elem.attrib['offset'],16) not in masked:
+                        masked.append(int(elem.attrib['offset'],16))
             if elem.tag == 'bitfield':
                 if elem.attrib['name'].lower() == 'dwen':
                     dwen_mask = elem.attrib['mask']
@@ -542,6 +548,8 @@ def harvest_from_file(filename):
         extra_fields += "    'bootrst_fuse' : " + "%s" % bootrst_fuse + ",\n"
     if buf_per_page is not None:
         extra_fields += "    'buffers_per_flash_page' : " + "%s" % buf_per_page + ",\n"
+    if masked:
+        extra_fields += "    'masked_registers' : [{}],\n".format(', '.join(hex(x) for x in masked))
 
 
     #pylint: disable=used-before-assignment
@@ -601,7 +609,7 @@ def main():
 
     if arguments.filename.endswith('.atdf'):
         dict_content = harvest_from_file(arguments.filename)
-        if arguments.interface is None or arguments.interface.lower() in dict_content.lower:
+        if arguments.interface is None or arguments.interface.lower() in dict_content.lower():
             content = "\nfrom pymcuprog.deviceinfo.eraseflags import ChiperaseEffect\n\n"
             content += "DEVICE_INFO = {{\n{}}}".format(dict_content)
             print(content)

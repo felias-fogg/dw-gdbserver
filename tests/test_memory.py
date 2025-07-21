@@ -56,6 +56,20 @@ class TestMemory(TestCase):
         self.mem.dbg.sram_read = MagicMock(side_effect=access_sram)
         self.assertEqual(self.mem.readmem("800000", "4"), bytearray([14, 13, 12, 11]))
 
+    def test_readmem_sram_masked_register_one_byte(self):
+        self.mem._masked_registers = [15, 1, 6]
+        self.assertEqual(self.mem.readmem("800001", "1"), bytearray([0xFF]))
+        self.mem.dbg.sram_read.assert_not_called()
+
+    def test_readmem_sram_masked_register_bytearray(self):
+        self.mem._masked_registers = [15, 1, 6]
+        sram = list(reversed(range(15)))
+        def access_sram(ix, length):
+            return bytearray(sram[ix:ix+length])
+        self.mem.dbg.sram_read = MagicMock(side_effect=access_sram)
+        self.assertEqual(self.mem.readmem("800005", "3"), bytearray([9, 0xFF, 7]))
+        self.assertEqual(self.mem.readmem("800004", "3"), bytearray([10, 9, 0xFF]))
+
     def test_readmem_eprom(self):
         eeprom = list(range(5))
         def access_eeprom(ix, length):

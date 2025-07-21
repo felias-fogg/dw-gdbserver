@@ -70,6 +70,7 @@ DEVICE_INFO = {
     'spmcsr_base' : 0x57,
     'osccal_base' : 0x51,
     'dwen_mask' : 0x08,
+    'masked_registers' : [0x4e],
     'device_id': 0x1E9007,
     'interface': 'ISP+HVSP+debugWIRE'
 }

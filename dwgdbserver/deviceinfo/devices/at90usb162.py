@@ -71,6 +71,7 @@ DEVICE_INFO = {
     'osccal_base' : 0x66,
     'dwen_mask' : 0x80,
     'bootrst_fuse' : 0x01,
+    'masked_registers' : [0x51, 0x4e, 0xf1, 0xce, 0x7f],
     'device_id': 0x1E9482,
     'interface': 'ISP+HVPP+debugWIRE'
 }
