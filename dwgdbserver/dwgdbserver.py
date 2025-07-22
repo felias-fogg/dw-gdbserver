@@ -176,7 +176,7 @@ class GdbHandler():
             return
         if self.mem.is_flash_empty() and not self.mon.is_noload():
             self.logger.warning("Cannot start execution without prior loading of executable")
-            self.send_debug_message("Load executable first before starting execution")
+            self.send_debug_message("No program loaded")
             self.send_signal(SIGILL)
             return
         newpc = None
@@ -504,7 +504,7 @@ class GdbHandler():
             return
         if self.mem.is_flash_empty() and not self.mon.is_noload():
             self.logger.debug("Cannot single-step without prior load")
-            self.send_debug_message("Load executable first before starting execution")
+            self.send_debug_message("No program loaded")
             self.send_signal(SIGILL)
             return
         newpc = None
@@ -579,11 +579,11 @@ class GdbHandler():
         vFlashDone command.
         """
         self.logger.debug("RSP packet: vFlashErase")
-        self.bp.cleanup_breakpoints()
-        if self._vflashdone:
-            self._vflashdone = False
-            self.mem.init_flash() # clear cache
         if self.mon.is_dw_mode_active():
+            self.bp.cleanup_breakpoints()
+            if self._vflashdone:
+                self._vflashdone = False
+                self.mem.init_flash() # clear cache
             if self.mem.is_flash_empty():
                 self.logger.info("Loading executable ...")
             self.send_packet("OK")
@@ -1842,7 +1842,7 @@ class MonitorCommand():
         return("", "Unknown 'monitor' command")
 
     def _mon_ambigious(self, _):
-        return("", "Ambiguous 'monitor' command")
+        return("", "Ambiguous 'monitor' command string")
 
     # pylint: disable=too-many-return-statements
     def _mon_breakpoints(self, tokens):
@@ -1850,22 +1850,22 @@ class MonitorCommand():
             if self._onlyhwbps and self._onlyswbps:
                 return("", "Internal confusion: No breakpoints are allowed")
             if self._onlyswbps:
-                return("", "Only software breakpoints are allowed")
+                return("", "Only software breakpoints")
             if self._onlyhwbps:
-                return("", "Only hardware breakpoints are allowed")
+                return("", "Only hardware breakpoints")
             return("", "All breakpoints are allowed")
         if 'all'.startswith(tokens[0]):
             self._onlyhwbps = False
             self._onlyswbps = False
-            return("", "All breakpoints are now allowed")
+            return("", "All breakpoints are allowed")
         if 'hardware'.startswith(tokens[0]):
             self._onlyhwbps = True
             self._onlyswbps = False
-            return("", "Only hardware breakpoints are now allowed")
+            return("", "Only hardware breakpoints")
         if 'software'.startswith(tokens[0]):
             self._onlyhwbps = False
             self._onlyswbps = True
-            return("", "Only software breakpoints are now allowed")
+            return("", "Only software breakpoints")
         return self._mon_unknown(tokens[0])
 
     def _mon_cache(self, tokens):
@@ -1904,28 +1904,28 @@ class MonitorCommand():
                         if platform.system() == 'Linux' else ""))
         if tokens[0] =="":
             if self._dw_mode_active:
-                return("", "debugWIRE mode is enabled")
-            return("", "debugWIRE mode is disabled")
+                return("", "debugWIRE is enabled")
+            return("", "debugWIRE is disabled")
         if "enable".startswith(tokens[0]):
             if not self._dw_mode_active:
                 if self._dw_activated_once:
                     return("", "Cannot reactivate debugWIRE\n" +
                                "You have to exit and restart the debugger")
                 # we set the state variable to active in the calling module
-                return("dwon", "debugWIRE mode is now enabled")
-            return("reset", "debugWIRE mode was already enabled")
+                return("dwon", "debugWIRE is enabled")
+            return("reset", "debugWIRE is enabled")
         if "disable".startswith(tokens[0]):
             if self._dw_mode_active:
                 self._dw_mode_active = False
-                return("dwoff", "debugWIRE mode is now disabled")
-            return("", "debugWIRE mode was already disabled")
+                return("dwoff", "debugWIRE is disabled")
+            return("", "debugWIRE is disabled")
         return self._mon_unknown(tokens[0])
 
     def _mon_flash_verify(self, tokens):
         if (("enable".startswith(tokens[0]) and tokens[0] != "") or
                 (tokens[0] == "" and self._verify is True)):
             self._verify = True
-            return("", "Always verifying that load operations are successful")
+            return("", "Verifying flash after load")
         if (("disable".startswith(tokens[0]) and tokens[0] != "") or
                 (tokens[0] == "" and self._verify is False)):
             self._verify = False
@@ -1989,11 +1989,11 @@ Single-stepping:          """ + ("safe" if self._safe else "interruptible"))
         if (("enable".startswith(tokens[0])  and tokens[0] != "") or
                 (tokens[0] == "" and self._noload is False)):
             self._noload = False
-            return("",  "Execution without prior 'load' command is impossible")
+            return("",  "Execution is only possible after a previous load command")
         if (("disable".startswith(tokens[0])  and tokens[0] != "")  or
                 (tokens[0] == "" and self._noload is True)):
             self._noload = True
-            return("", "Execution without prior 'load' command is possible")
+            return("", "Execution is always possible")
         return self._mon_unknown(tokens[0])
 
     def _mon_range_stepping(self, tokens):
@@ -2010,7 +2010,7 @@ Single-stepping:          """ + ("safe" if self._safe else "interruptible"))
     def _mon_reset(self, _):
         if self._dw_mode_active:
             return("reset", "MCU has been reset")
-        return("","Enable debugWIRE mode first")
+        return("","Enable debugWIRE first")
 
     def _mon_singlestep(self, tokens):
         if (("safe".startswith(tokens[0]) and tokens[0] != "") or
@@ -2035,7 +2035,7 @@ Single-stepping:          """ + ("safe" if self._safe else "interruptible"))
         return self._mon_unknown(tokens[0])
 
     def _mon_version(self, _):
-        return("", "dw-gdbserver {}".format(importlib.metadata.version("dwgdbserver")))
+        return("", "dw-gdbserver version {}".format(importlib.metadata.version("dwgdbserver")))
 
     # The following commands are for internal purposes
     def _mon_no_xml(self, _):
@@ -2067,7 +2067,7 @@ Single-stepping:          """ + ("safe" if self._safe else "interruptible"))
     def _mon_live_tests(self, _):
         if self._dw_mode_active:
             return("live_tests", "Tests done")
-        return("", "Enable debugWIRE mode before starting a live test run")
+        return("", "Enable debugWIRE first")
 
 class DebugWIRE():
     """
@@ -2594,9 +2594,12 @@ SUBSYSTEM=="usb", ATTRS{idVendor}=="03eb", ATTRS{idProduct}=="2180", MODE="0666"
 
     try:
         server.serve()
-    except (EndOfSession, SystemExit, KeyboardInterrupt):
+    except (EndOfSession, SystemExit):
         logger.info("End of session")
         return 0
+    except KeyboardInterrupt:
+        logger.info("Terminated by Ctrl-C")
+        return 1
     except (ValueError, Exception) as e:
         if logger.getEffectiveLevel() != logging.DEBUG:
             logger.critical("Fatal Error: %s",e)

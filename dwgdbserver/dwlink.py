@@ -16,6 +16,10 @@ import serial.threaded
 from serial import SerialException
 import serial.tools.list_ports
 
+class DetachException(Exception):
+    """Termination of session because of a detach command"""
+    def __init__(self, msg=None):
+        super().__init__(msg)
 
 class SerialToNet(serial.threaded.Protocol):
     """serial->socket"""
@@ -66,13 +70,12 @@ class SerialToNet(serial.threaded.Protocol):
         otherwise tell the serial connection is closed.
         """
         if exc:
-
             sys.stderr.write('[ERROR] ' +  repr(exc) + '\n\r')
             sys.stderr.write('[INFO] Serial connection lost, will exit\n\r')
             time.sleep(0.2)
         else:
             sys.stderr.write('[INFO] Serial connection closed\n\r')
-        os._exit(1)
+            os._exit(0)
 
 def discover(args):
     """
@@ -188,6 +191,8 @@ def main(args):
                     if not data:
                         break
                     ser.write(data)                 # get a bunch of bytes and send them
+                    if b'$D#44' in data:
+                        raise DetachException
                     if args.verbose == "debug":
                         sys.stderr.write("[DEBUG] sent: {}\n".format(data))
                         sys.stderr.flush()
@@ -202,7 +207,9 @@ def main(args):
             sys.stderr.write('[INFO] Disconnected\n\r')
             ser.write(b'$D#44') # send detach command to dw-link debugger
             client_socket.close()
-    except (KeyboardInterrupt, Exception):  # pylint: disable=broad-exception-caught
+    except KeyboardInterrupt:
+        os._exit(1)
+    except Exception: # pylint: disable=broad-exception-caught
         pass
 
     if subprc:

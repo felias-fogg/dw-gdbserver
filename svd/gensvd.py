@@ -1,8 +1,8 @@
 """
 Generates SVD files from the ATDF files in a given directory
 Uses atdf2svd as its workhorse
-
 """
+
 import os
 import argparse
 import textwrap

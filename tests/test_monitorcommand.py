@@ -16,7 +16,7 @@ class TestMonitorCommand(TestCase):
         self.mo = MonitorCommand(False, False)
 
     def test_dispatch_ambigious(self):
-        self.assertEqual(self.mo.dispatch(["ver"]), ("", "Ambiguous 'monitor' command"))
+        self.assertEqual(self.mo.dispatch(["ver"]), ("", "Ambiguous 'monitor' command string"))
 
     def test_dispatch_unknown(self):
         self.assertEqual(self.mo.dispatch(["XXX"]), ("", "Unknown 'monitor' command"))
@@ -27,20 +27,20 @@ class TestMonitorCommand(TestCase):
         self.assertEqual(self.mo.dispatch(["break"]), ("", "All breakpoints are allowed"))
         self.mo._onlyhwbps = True
         self.mo._onlyswbps = False
-        self.assertEqual(self.mo.dispatch(["break"]), ("", "Only hardware breakpoints are allowed"))
+        self.assertEqual(self.mo.dispatch(["break"]), ("", "Only hardware breakpoints"))
         self.mo._onlyhwbps = False
         self.mo._onlyswbps = True
-        self.assertEqual(self.mo.dispatch(["break"]), ("", "Only software breakpoints are allowed"))
+        self.assertEqual(self.mo.dispatch(["break"]), ("", "Only software breakpoints"))
         self.mo._onlyhwbps = True
         self.mo._onlyswbps = True
         self.assertEqual(self.mo.dispatch(["break"]), ("", "Internal confusion: No breakpoints are allowed"))
-        self.assertEqual(self.mo.dispatch(["break", "all"]), ("", "All breakpoints are now allowed"))
+        self.assertEqual(self.mo.dispatch(["break", "all"]), ("", "All breakpoints are allowed"))
         self.assertEqual(self.mo._onlyhwbps, False)
         self.assertEqual(self.mo._onlyswbps, False)
-        self.assertEqual(self.mo.dispatch(["break", "hardware"]), ("", "Only hardware breakpoints are now allowed"))
+        self.assertEqual(self.mo.dispatch(["break", "hardware"]), ("", "Only hardware breakpoints"))
         self.assertEqual(self.mo._onlyhwbps, True)
         self.assertEqual(self.mo._onlyswbps, False)
-        self.assertEqual(self.mo.dispatch(["break", "software"]), ("", "Only software breakpoints are now allowed"))
+        self.assertEqual(self.mo.dispatch(["break", "software"]), ("", "Only software breakpoints"))
         self.assertEqual(self.mo._onlyhwbps, False)
         self.assertEqual(self.mo._onlyswbps, True)
         self.assertEqual(self.mo.dispatch(["break", "X"]), ("", "Unknown 'monitor' command"))
@@ -56,14 +56,14 @@ class TestMonitorCommand(TestCase):
 
     def test_dispatch_debugWIRE(self):
         self.mo._dw_mode_active = False
-        self.assertEqual(self.mo.dispatch(["d", ""]), ("", "debugWIRE mode is disabled"))
+        self.assertEqual(self.mo.dispatch(["d", ""]), ("", "debugWIRE is disabled"))
         self.mo._dw_mode_active = True
-        self.assertEqual(self.mo.dispatch(["debugwire"]), ("", "debugWIRE mode is enabled"))
+        self.assertEqual(self.mo.dispatch(["debugwire"]), ("", "debugWIRE is enabled"))
         self.mo._dw_mode_active = False
-        self.assertEqual(self.mo.dispatch(["debug", "e"]), ("dwon", "debugWIRE mode is now enabled"))
+        self.assertEqual(self.mo.dispatch(["debug", "e"]), ("dwon", "debugWIRE is enabled"))
         self.assertFalse(self.mo._dw_mode_active) # The enable command does NOT change the value of the state var!
         self.mo._dw_mode_active = True
-        self.assertEqual(self.mo.dispatch(["debug", "dis"]), ("dwoff", "debugWIRE mode is now disabled"))
+        self.assertEqual(self.mo.dispatch(["debug", "dis"]), ("dwoff", "debugWIRE is disabled"))
         self.assertFalse(self.mo._dw_mode_active)
         self.mo._dw_activated_once = True
         self.assertEqual(self.mo.dispatch(["debug", "enable"]),
@@ -73,13 +73,13 @@ class TestMonitorCommand(TestCase):
 
     def test_dispatch_flashVerify(self):
         self.assertTrue(self.mo._verify)
-        self.assertEqual(self.mo.dispatch(['veri']), ("", "Always verifying that load operations are successful"))
+        self.assertEqual(self.mo.dispatch(['veri']), ("", "Verifying flash after load"))
         self.assertEqual(self.mo.dispatch(['verify', 'disable']), ("", "Load operations are not verified"))
         self.assertFalse(self.mo._verify)
-        self.assertEqual(self.mo.dispatch(['veri', 'e']), ("", "Always verifying that load operations are successful"))
+        self.assertEqual(self.mo.dispatch(['veri', 'e']), ("", "Verifying flash after load"))
         self.assertTrue(self.mo._verify)
         self.assertEqual(self.mo.dispatch(['veri', 'ex']), ("", "Unknown 'monitor' command"))
-        self.assertEqual(self.mo.dispatch(['ver']), ("", "Ambiguous 'monitor' command"))
+        self.assertEqual(self.mo.dispatch(['ver']), ("", "Ambiguous 'monitor' command string"))
 
 
     def test_dispatch_help(self):
@@ -104,9 +104,9 @@ class TestMonitorCommand(TestCase):
 
     def test_dispatch_noload(self):
         self.assertFalse(self.mo._noload)
-        self.assertEqual(self.mo.dispatch(['onlyloaded', 'dis']), ("", "Execution without prior 'load' command is possible"))
+        self.assertEqual(self.mo.dispatch(['onlyloaded', 'dis']), ("", "Execution is always possible"))
         self.assertTrue(self.mo._noload)
-        self.assertEqual(self.mo.dispatch(['only', 'enable']), ("",  "Execution without prior 'load' command is impossible"))
+        self.assertEqual(self.mo.dispatch(['only', 'enable']), ("",  "Execution is only possible after a previous load command"))
         self.assertFalse(self.mo._noload)
 
     def test_dispatch_range(self):
@@ -120,7 +120,7 @@ class TestMonitorCommand(TestCase):
 
     def test_dispatch_reset(self):
         self.mo._dw_mode_active = False
-        self.assertEqual(self.mo.dispatch(['reset', 'halt']), ("","Enable debugWIRE mode first"))
+        self.assertEqual(self.mo.dispatch(['reset', 'halt']), ("","Enable debugWIRE first"))
         self.mo._dw_mode_active = True
         self.assertEqual(self.mo.dispatch(['res']), ("reset", "MCU has been reset"))
 
@@ -145,4 +145,4 @@ class TestMonitorCommand(TestCase):
             importlib.metadata.version("dwgdbserver")
         except importlib.metadata.PackageNotFoundError:
             return
-        self.assertEqual(self.mo.dispatch(['version']), ("", "dw-gdbserver {}".format(importlib.metadata.version("dwgdbserver"))))
+        self.assertEqual(self.mo.dispatch(['version']), ("", "dw-gdbserver version {}".format(importlib.metadata.version("dwgdbserver"))))
