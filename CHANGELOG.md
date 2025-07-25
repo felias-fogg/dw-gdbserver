@@ -1,5 +1,9 @@
 # Changelog
 
+### V2.3.2 (25-Jul-2025)
+
+- Change in README, finalizing development in this repo!
+
 ### v2.3.0 (22-July-2025)
 
 - Added: Write-only registers are extracted from the ATDF files and listed in the masked_registers list in the device files
