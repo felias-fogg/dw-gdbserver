@@ -257,7 +257,7 @@ debug_init_cmds =
     end
     define pio_reset_run_target
          monitor reset
-	       continue
+         continue
     end
     target remote $DEBUG_PORT
     monitor debugwire enable
@@ -269,6 +269,8 @@ debug_build_flags =
 ```
 
 Note that the debug environment should be the default one. It should be the first if no default environment has been declared.
+
+Meanwhile you also can use SVD files to get a nive view on your peripheal registers. Either put the appropriate SVD file from the repo folder `svd` into the project folder and add the line `debug_svd_path = <mcuname>.svd` to the platform.ini or put all SVD files into `.platformio/platforms/atmelavr/misc/svd/` and extend the debug section in the appropriate JSON board file in `~/.platformio/platforms/atmelavr/boards/` by `"svd_path": "<mcuname>.svd"`.
 
 I further noticed that the avr-gdb debugger in the PlatformIO toolchain is quite dated and does not start (e.g. under Ubuntu 24.04 and macOS 15.5). Simply replace it with a more recent version from /usr/bin or /usr/local/bin, perhaps after having it installed with you local packet manager. The location where PlatformIO stores its copy of avr-gdb is `~/.platformio/packages/toolchain-atmelavr/` , where the tilde symbol signifies the home directory of the user.
 
