@@ -1,4 +1,6 @@
-#  dw-gdbserver
+![PyPI](https://img.shields.io/pypi/pyversions/dwgdbserver) [![PyPI Downloads](https://static.pepy.tech/personalized-badge/dwgdbserver?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLACK&right_color=GREEN&left_text=downloads)](https://pepy.tech/projects/dwgdbserver)  [![Commits since latest](https://img.shields.io/github/commits-since/felias-fogg/dw-gdbserver/latest?include_prereleases)](https://github.com/felias-fogg/dw-gdbserver/commits/master)
+
+# dw-gdbserver
 
 *Development in this repository has stopped. It will be continued in the repository [pyavrocd](https://github.com/felias-fogg/pyavrocd). The plan is to extend the server to MCUs with additional debug interfaces, such as JTAG, PDI, and UPDI.*
 
