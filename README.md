@@ -2,7 +2,7 @@
 
 # dw-gdbserver
 
-*Development in this repository has stopped. It will be continued in the repository [pyavrocd](https://github.com/felias-fogg/pyavrocd). The plan is to extend the server to MCUs with additional debug interfaces, such as JTAG, PDI, and UPDI.*
+*Development in this repository has stopped. It will be continued in the repository [PaYavOCD](https://github.com/felias-fogg/PyAvrOCD). The plan is to extend the server to MCUs with additional debug interfaces, such as JTAG, PDI, and UPDI.*
 
 ------
 
